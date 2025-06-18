@@ -1,0 +1,13 @@
+# pv.template.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${APP_NAME}-${SERVICE_NAME}-pv
+spec:
+  capacity:
+    storage: ${STORAGE_SIZE}
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ${STORAGE_CLASS_NAME}
+  hostPath:
+    path: "${HOST_PATH_BASE}/${APP_NAME}/${SERVICE_NAME}"

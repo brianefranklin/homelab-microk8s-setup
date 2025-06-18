@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+.localized
+.Trashes
+.fseventsd/
+
+# Build artifacts
+build/
+dist/
+
+# Dependencies
+node_modules/
+Pods/
+vendor/
+Carthage/
+
+# IDEs
+.idea/
+.vscode/
+*.xcworkspace/
+xcuserdata/
+
+# Environment
+.env
+
+# Logs and temporary files
+*.log
+tmp/
+temp/

@@ -1,0 +1,54 @@
+# harbor-values.template.yaml
+expose:
+  type: ingress
+  tls:
+    # cert-manager will create and manage the certificate secret
+    certSource: cluster-issuer
+  ingress:
+    # The domain for your Harbor instance
+    hosts:
+      core: ${HARBOR_HOSTNAME}
+    # The ingress class used by the MicroK8s ingress addon
+    className: "public"
+    annotations:
+      # This tells ingress to use our ClusterIssuer
+      cert-manager.io/cluster-issuer: "letsencrypt-route53-clusterissuer"
+      # These annotations ensure traffic is handled correctly
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+# This must match the ingress host with https://
+externalURL: https://${HARBOR_HOSTNAME}
+
+# Set a strong admin password from the secret
+harborAdminPassword: "${HARBOR_ADMIN_PASSWORD}"
+
+# Use the pre-provisioned, existing PVCs for all components
+ppersistence:
+  enabled: true
+  resourcePolicy: "keep"
+  persistentVolumeClaim:
+    registry:
+      existingClaim: "${APP_NAME}-registry-pvc"
+    jobservice:
+      existingClaim: "${APP_NAME}-jobservice-pvc"
+    database:
+      existingClaim: "${APP_NAME}-database-pvc"
+    redis:
+      existingClaim: "${APP_NAME}-redis-pvc"
+    trivy:
+      existingClaim: "${APP_NAME}-trivy-pvc"
+
+# Provide correct file permissions for the Harbor components
+# This is NOT necessary for the Harbor database to run correctly
+# The Harbor database container runs as user ID 10000.
+database:
+  # This securityContext tells Kubernetes to make the volume writable
+  # by the group ID 10000, which the container runs as.
+  podSecurityContext:
+    enabled: true
+    fsGroup: 10000
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 10000
