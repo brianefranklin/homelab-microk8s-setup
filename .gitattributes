@@ -1,0 +1,65 @@
+# --- Line Ending Normalization ---
+#
+# This section ensures consistent line endings across different operating systems.
+# 'text=auto' tells Git to handle line endings automatically, converting to LF on
+# commit and to the platform's native line ending on checkout.
+# 'eol=lf' forces line endings for all recognized text files to be LF (Linux style).
+# This is generally preferred for web projects to ensure consistency with Unix-based
+# servers and build environments.
+
+* text=auto eol=lf
+
+# --- Binary File Handling ---
+#
+# This section marks common binary file types, instructing Git not to
+# attempt text-based diffs or merges on them. This prevents corruption
+# and improves performance for these files.
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.svg binary
+*.webp binary
+*.ico binary
+
+# Audio and Video
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.mp4 binary
+*.webm binary
+*.avi binary
+*.mov binary
+
+# Fonts
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+
+# Archives and Compressed Files
+*.zip binary
+*.tar binary
+*.gz binary
+*.tgz binary
+*.rar binary
+*.7z binary
+
+# Documents
+*.pdf binary
+*.doc binary
+*.docx binary
+*.xls binary
+*.xlsx binary
+*.ppt binary
+*.pptx binary
+
+# Executables/Libraries (if present in repo, e.g., for specific tools)
+*.exe binary
+*.dll binary
+*.bin binary
+*.app binary # macOS applications
+
