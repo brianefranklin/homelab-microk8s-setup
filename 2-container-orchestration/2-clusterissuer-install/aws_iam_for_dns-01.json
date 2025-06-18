@@ -1,0 +1,33 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowListRecordsInSpecificZone",
+            "Effect": "Allow",
+            "Action": "route53:ListResourceRecordSets",
+            "Resource": "arn:aws:route53:::hostedzone/Z02976143L104L8LWSK86"
+        },
+        {
+            "Sid": "AllowChangeSpecificTXTRecord",
+            "Effect": "Allow",
+            "Action": "route53:ChangeResourceRecordSets",
+            "Resource": "arn:aws:route53:::hostedzone/Z02976143L104L8LWSK86",
+            "Condition": {
+                "ForAllValues:StringEquals": {
+                    "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+                        "_acme-challenge.probablyfine.click." // e.g., _acme-challenge.harbor.example.com.
+                    ],
+                    "route53:ChangeResourceRecordSetsRecordTypes": [
+                        "TXT"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "AllowGetChangeStatus",
+            "Effect": "Allow",
+            "Action": "route53:GetChange",
+            "Resource": "arn:aws:route53:::change/*" // This is a standard global resource for GetChange
+        }
+    ]
+}
