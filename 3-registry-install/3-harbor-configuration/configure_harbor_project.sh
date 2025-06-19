@@ -14,18 +14,29 @@
 # 7. Schedule system-wide garbage collection for every Tuesday at 4:00 AM.
 # ---
 
-# --- Environment Variables ---
-# Set these variables in your environment or modify them directly in the script.
+# --- Source Shared Environment Variables ---
+# These variables can be pre-set in harbor_env.sh.
 # If any of these variables are not set (or are set to an empty string), 
 # the script will fall back to prompting the user interactively for that specific 
 # piece of information.
-#export HARBOR_URL="https://myharbor.example.com"
-#export HARBOR_ADMIN_USER="admin"
-#export HARBOR_ADMIN_PASS="supersecretpassword"
-#export PROJECT_NAME="production-app"
-#export ROBOT_NAME="prod-builder-robot"
-#export DELETE_OTHER_PROJECTS="no" # Set to "yes" to enable non-interactive deletion of other projects
+HARBOR_ENV_PATH="../harbor_env.sh" # Path relative to this script
 
+if [ -f "$HARBOR_ENV_PATH" ]; then
+    # shellcheck source=../harbor_env.sh
+    source "$HARBOR_ENV_PATH"
+    echo -e "\033[0;36m[INFO] Loaded shared configuration from '$HARBOR_ENV_PATH'.\033[0m"
+else
+    # Proceeding without the env file means all values will be prompted for.
+    echo -e "\033[1;33m[WARNING] Shared environment file '$HARBOR_ENV_PATH' not found. You will be prompted for all configurations.\033[0m"
+fi
+
+# Variables expected from harbor_env.sh (or to be prompted for):
+# HARBOR_URL
+# HARBOR_ADMIN_USER
+# HARBOR_ADMIN_PASS
+# PROJECT_NAME
+# ROBOT_NAME
+# DELETE_OTHER_PROJECTS
 
 # --- Color Codes ---
 COLOR_GREEN='\033[0;32m'
@@ -99,11 +110,39 @@ prompt_user() {
 
     # HARBOR_ADMIN_PASS
     if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
-        read -sp "Enter Harbor Admin Password: " HARBOR_ADMIN_PASS
-        echo # Newline after secret prompt
+        # Attempt to retrieve from Kubernetes secret if HARBOR_ADMIN_PASS is not set
+        # HARBOR_INSTANCE_NAME and KUBECTL_CMD are expected to be set from harbor_env.sh
+        if [[ -n "$HARBOR_INSTANCE_NAME" && -n "$KUBECTL_CMD" ]]; then
+            local k8s_secret_name="${HARBOR_INSTANCE_NAME}-admin-password"
+            local k8s_namespace="${HARBOR_INSTANCE_NAME}"
+
+            info "HARBOR_ADMIN_PASS not set. Attempting to retrieve from Kubernetes secret '$k8s_secret_name' in namespace '$k8s_namespace'..."
+            
+            local fetched_password
+            # Suppress stderr for kubectl get secret to handle "not found" gracefully
+            fetched_password=$($KUBECTL_CMD get secret "$k8s_secret_name" -n "$k8s_namespace" -o jsonpath="{.data.password}" 2>/dev/null | base64 --decode 2>/dev/null)
+
+            if [[ -n "$fetched_password" ]]; then
+                HARBOR_ADMIN_PASS="$fetched_password"
+                success "Successfully retrieved Harbor Admin Password from Kubernetes secret."
+            else
+                warn "Could not retrieve password from Kubernetes secret (secret not found, key missing, or permission issue)."
+                # Fall through to manual prompt
+            fi
+        else
+            warn "HARBOR_INSTANCE_NAME or KUBECTL_CMD is not set (likely missing from harbor_env.sh)."
+            warn "Cannot attempt to read Harbor admin password from Kubernetes secret. Please provide it manually."
+        fi
+    fi
+
+    # If still empty after attempting to read from secret (or if pre-set was empty), prompt the user
+    if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
+        read -sp "Enter Harbor Admin Password (will not be echoed): " HARBOR_ADMIN_PASS
+        echo # Newline after secret input
     else
         info "Using pre-set HARBOR_ADMIN_PASS (hidden)."
     fi
+
     if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
         fail "Harbor Admin Password cannot be empty."
     fi

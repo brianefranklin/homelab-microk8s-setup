@@ -3,27 +3,36 @@
 
 # This script is not idempotent and should be run only once to set up the storage.
 
-# --- CONFIGURE YOUR CORE VALUES HERE ---
-export APP_NAME="harbor"
-export K8S_NAMESPACE="harbor"
+# --- Source Shared Environment Variables ---
+HARBOR_ENV_PATH="../harbor_env.sh" # Path relative to this script
 
-# Base directory on the host for storage
-# Choosing a base directory outside of the default /var/snap/microk8s/common/ might
-# break compatibility with strictly confined microk8s installations.
-export HOST_PATH_BASE="/var/snap/microk8s/common/harbor-storage"
-##export HOST_PATH_BASE="/mnt/k8s-data" 
+if [ -f "$HARBOR_ENV_PATH" ]; then
+    # shellcheck source=../harbor_env.sh
+    source "$HARBOR_ENV_PATH"
+else
+    echo "❌ ERROR: Shared environment file '$HARBOR_ENV_PATH' not found." >&2
+    echo "Please ensure it exists and is configured." >&2
+    exit 1
+fi
 
-# The user ID that the Harbor containers run as. This is critical for permissions.
-# All Harbor components use the same non-root user.
-export VOLUME_OWNER_UID="10000"
+# --- Validate Required Variables from harbor_env.sh ---
+REQUIRED_VARS=(
+    "HARBOR_INSTANCE_NAME" "HARBOR_STORAGE_HOST_PATH_BASE" "HARBOR_STORAGE_VOLUME_OWNER_UID"
+    "HARBOR_STORAGE_REGISTRY_SIZE" "HARBOR_STORAGE_JOBSERVICE_SIZE" "HARBOR_STORAGE_DATABASE_SIZE"
+    "HARBOR_STORAGE_REDIS_SIZE" "HARBOR_STORAGE_TRIVY_SIZE" "KUBECTL_CMD"
+)
+for VAR_NAME in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!VAR_NAME}" ]; then
+        echo "❌ ERROR: Required variable '$VAR_NAME' is not set in '$HARBOR_ENV_PATH'." >&2
+        exit 1
+    fi
+done
 
-# --- CONFIGURE STORAGE SIZES FOR EACH SERVICE ---
-export REGISTRY_STORAGE_SIZE="20Gi"
-export JOBSERVICE_STORAGE_SIZE="1Gi"
-export DATABASE_STORAGE_SIZE="5Gi"
-export REDIS_STORAGE_SIZE="1Gi"
-export TRIVY_STORAGE_SIZE="5Gi"
-# ----------------------------------------------------
+# --- Use Sourced Variables ---
+APP_NAME="${HARBOR_INSTANCE_NAME}"
+K8S_NAMESPACE="${HARBOR_INSTANCE_NAME}"
+HOST_PATH_BASE="${HARBOR_STORAGE_HOST_PATH_BASE}"
+VOLUME_OWNER_UID="${HARBOR_STORAGE_VOLUME_OWNER_UID}"
 
 # --- SCRIPT LOGIC (DO NOT EDIT BELOW THIS LINE) ---
 SERVICES=("registry" "jobservice" "database" "redis" "trivy")
@@ -40,14 +49,14 @@ echo "--- Preparing Persistent Storage for Application: $APP_NAME ---"
 
 # Ensure the base directory exists
 echo "Ensuring base host directory exists at ${HOST_PATH_BASE}/${APP_NAME}..."
-sudo mkdir -p "${HOST_PATH_BASE}/${APP_NAME}"
+sudo mkdir -p "${HOST_PATH_BASE}/${APP_NAME}" # Uses HOST_PATH_BASE from env file
 echo "---"
 
 # Loop through each service to create its storage
 for SERVICE_NAME in "${SERVICES[@]}"; do
     echo "Processing storage for service: $SERVICE_NAME"
 
-    # Dynamically get the storage size for the current service
+    # Dynamically get the storage size for the current service from HARBOR_STORAGE_*_SIZE variables
     size_var_name="${SERVICE_NAME^^}_STORAGE_SIZE" # e.g., DATABASE_STORAGE_SIZE
     export STORAGE_SIZE=${!size_var_name}
 
@@ -65,12 +74,12 @@ for SERVICE_NAME in "${SERVICES[@]}"; do
 
     # 3. Apply PV Manifest
     echo "  -> Applying PersistentVolume manifest..."
-    envsubst < "$PV_TEMPLATE" | microk8s.kubectl apply -f -
+    envsubst < "$PV_TEMPLATE" | $KUBECTL_CMD apply -f -
 
     # 4. Apply PVC Manifest
     echo "  -> Applying PersistentVolumeClaim manifest in namespace '$K8S_NAMESPACE'..."
-    microk8s.kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | microk8s.kubectl apply -f -
-    envsubst < "$PVC_TEMPLATE" | microk8s.kubectl apply -f -
+    $KUBECTL_CMD create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | $KUBECTL_CMD apply -f -
+    envsubst < "$PVC_TEMPLATE" | $KUBECTL_CMD apply -f -
 
     echo "  -> Storage for '$SERVICE_NAME' successfully provisioned."
     echo "---"
