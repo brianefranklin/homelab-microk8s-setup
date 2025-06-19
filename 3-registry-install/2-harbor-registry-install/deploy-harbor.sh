@@ -7,34 +7,47 @@
 # microk8s.kubectl delete secret harbor-admin-password -n harbor
 # Then re-run this script to generate a new password and re-deploy Harbor.
 
-# --- CONFIGURE YOUR CORE VALUES HERE ---
-# By setting these few base variables, all others will be generated automatically.
-export APP_NAME="harbor"
-export DOMAIN="yourdomain.com"
-export CHART_REPO_NAME="goharbor"
-# ----------------------------------------------------
+# --- Source Shared Environment Variables ---
+HARBOR_ENV_PATH="../harbor_env.sh" # Path relative to this script
 
-# --- DERIVED VARIABLES (DO NOT EDIT) ---
-# These variables are constructed from the core values above.
-export HARBOR_HOSTNAME="${APP_NAME}.${DOMAIN}"
-export HARBOR_NAMESPACE="${APP_NAME}"
-export HELM_RELEASE_NAME="${APP_NAME}"
-export SECRET_NAME="${APP_NAME}-admin-password"
-export HELM_CHART_NAME="${CHART_REPO_NAME}/${APP_NAME}"
-export REPO_NAME="${CHART_REPO_NAME}"
-export REPO_URL="https://helm.${CHART_REPO_NAME}.io"
+if [ -f "$HARBOR_ENV_PATH" ]; then
+    # shellcheck source=../harbor_env.sh
+    source "$HARBOR_ENV_PATH"
+else
+    echo "❌ ERROR: Shared environment file '$HARBOR_ENV_PATH' not found." >&2
+    echo "Please ensure it exists and is configured." >&2
+    exit 1
+fi
+
+# --- Validate Required Variables from harbor_env.sh ---
+REQUIRED_VARS=(
+    "HARBOR_INSTANCE_NAME" "HARBOR_DOMAIN" "HARBOR_PROTOCOL"
+    "HARBOR_CHART_REPO_ALIAS" "HARBOR_CHART_REPO_URL" "KUBECTL_CMD" "HELM_CMD"
+)
+for VAR_NAME in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!VAR_NAME}" ]; then
+        echo "❌ ERROR: Required variable '$VAR_NAME' is not set in '$HARBOR_ENV_PATH'." >&2
+        exit 1
+    fi
+done
+
+# --- DERIVED VARIABLES (Constructed from sourced HARBOR_INSTANCE_NAME, HARBOR_DOMAIN, etc.) ---
+export HARBOR_HOSTNAME="${HARBOR_INSTANCE_NAME}.${HARBOR_DOMAIN}"
+export HARBOR_NAMESPACE="${HARBOR_INSTANCE_NAME}"
+export HELM_RELEASE_NAME="${HARBOR_INSTANCE_NAME}"
+export SECRET_NAME="${HARBOR_INSTANCE_NAME}-admin-password" # Secret for admin password
+export HELM_CHART_NAME="${HARBOR_CHART_REPO_ALIAS}/${HARBOR_INSTANCE_NAME}" # Assumes chart name is 'harbor' or same as instance_name
 # ----------------------------------------------------
 
 # --- MANAGE HARBOR ADMIN PASSWORD ---
 # This block checks if the password secret already exists. If not, it generates one.
 # This makes the script safe to re-run for upgrades.
-
 echo "Checking for existing Harbor admin password secret ('$SECRET_NAME')..."
 
-if microk8s.kubectl get secret "$SECRET_NAME" -n "$HARBOR_NAMESPACE" > /dev/null 2>&1; then
+if $KUBECTL_CMD get secret "$SECRET_NAME" -n "$HARBOR_NAMESPACE" > /dev/null 2>&1; then
     # --- SECRET EXISTS: READ THE EXISTING PASSWORD ---
     echo "✅ Secret found. Reading existing password for upgrade."
-    export HARBOR_ADMIN_PASSWORD=$(microk8s.kubectl get secret "$SECRET_NAME" -n "$HARBOR_NAMESPACE" -o jsonpath="{.data.password}" | base64 --decode)
+    export HARBOR_ADMIN_PASSWORD=$($KUBECTL_CMD get secret "$SECRET_NAME" -n "$HARBOR_NAMESPACE" -o jsonpath="{.data.password}" | base64 --decode)
 
 else
     # --- SECRET DOES NOT EXIST: GENERATE AND CREATE A NEW ONE ---
@@ -53,30 +66,26 @@ else
     # Create the Kubernetes secret with the new password
     echo "Creating new secret '$SECRET_NAME'..."
     # Ensure the namespace exists before creating the secret in it
-    microk8s.kubectl create namespace "$HARBOR_NAMESPACE" --dry-run=client -o yaml | microk8s.kubectl apply -f -
+    $KUBECTL_CMD create namespace "$HARBOR_NAMESPACE" --dry-run=client -o yaml | $KUBECTL_CMD apply -f -
     
-    microk8s.kubectl create secret generic "$SECRET_NAME" -n "$HARBOR_NAMESPACE" \
+    $KUBECTL_CMD create secret generic "$SECRET_NAME" -n "$HARBOR_NAMESPACE" \
         --from-literal=password="$HARBOR_ADMIN_PASSWORD"
     echo "✅ New secret created successfully."
 fi
 echo "---"
 
-# Define the repo name and URL for easy reuse
-REPO_NAME="goharbor"
-REPO_URL="https://helm.goharbor.io"
-
 # Check if the repository is already added by searching the output of 'helm repo list'
-if ! microk8s.helm3 repo list | grep -q "^${REPO_NAME}\s"; then
+if ! $HELM_CMD repo list | grep -q "^${HARBOR_CHART_REPO_ALIAS}\s"; then
     # This block runs ONLY if the grep command fails (i.e., the repo is not found)
-    echo "Helm repository '$REPO_NAME' not found. Adding it now..."
-    microk8s.helm3 repo add "$REPO_NAME" "$REPO_URL"
+    echo "Helm repository '$HARBOR_CHART_REPO_ALIAS' not found. Adding it now from '$HARBOR_CHART_REPO_URL'..."
+    $HELM_CMD repo add "$HARBOR_CHART_REPO_ALIAS" "$HARBOR_CHART_REPO_URL"
 else
-    echo "✅ Helm repository '$REPO_NAME' already configured."
+    echo "✅ Helm repository '$HARBOR_CHART_REPO_ALIAS' already configured."
 fi
 
 # It's always a good practice to update the repo to ensure you have the latest chart versions
 echo "Updating Helm repositories..."
-microk8s.helm3 repo update
+$HELM_CMD repo update
 
 # --- DEPLOY WITH HELM ---
 echo "Deploying Harbor with the following configuration:"
@@ -90,7 +99,7 @@ echo "---"
 # Use envsubst to create the final values file from the template,
 # then pipe it to 'helm upgrade --install' using the '-f -' flag.
 # 'helm upgrade --install' is idempotent: it will install if it doesn't exist, or upgrade if it does.
-envsubst < harbor-values.template.yaml | microk8s.helm3 upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_NAME" \
+envsubst < harbor-values.template.yaml | $HELM_CMD upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_NAME" \
   --namespace "$HARBOR_NAMESPACE" \
   --create-namespace \
   --atomic \
