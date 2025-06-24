@@ -26,7 +26,7 @@ export ARC_CONTROLLER_SECRET_NAME="controller-manager"
 export GITHUB_REPOSITORY="your-username/your-repo-name"
 
 # GitHub App ID for your Actions Runner Controller (ARC) app
-# GitHub App credentials for the controller-manager secret
+# GitHub App credentials for the controller-manager secret (do not wrap in extra quotes)
 CFG_GITHUB_APP_ID=""
 CFG_GITHUB_APP_INSTALLATION_ID=""
 CFG_GITHUB_APP_PRIVATE_KEY_PATH=""
@@ -76,4 +76,6 @@ export RUNNER_DEPLOYMENT_TEMPLATE_FILE="runner-deployment.template.yaml"
 export WORKFLOW_TEMPLATE_FILE=".github/workflows/deploy.template.yaml"
 # Base directory name for generating the workflow file, relative to the script's location.
 export GENERATED_WORKFLOW_BASE_DIR="generated-workflow"
+# Filename for the generated workflow file.
+export GENERATED_WORKFLOW_FILENAME="deploy.yaml" # This was missing
 # --------------------------------------

@@ -19,6 +19,7 @@
 # PREREQUISITES:
 #   - A configured `arc_env.sh` file in the same directory.
 #   - Your GitHub App ID, Installation ID, and the path to your App's private key file.
+#   - `curl` for API calls.
 #   - `kubectl` and `helm` installed and configured to point to your cluster.
 #   - `envsubst` (usually available via gettext package).
 #   - `gh` CLI and `jq` for automatic GitHub secret configuration (optional).
@@ -45,6 +46,43 @@ error() {
     exit 1
 }
 
+success() {
+    echo -e "\033[0;32m[SUCCESS]\033[0m $1"
+}
+
+# Function to verify GitHub PAT has the required scopes
+verify_github_pat_scopes() {
+    local token_to_check="$1"
+    local required_scope="read:packages"
+    
+    info "Verifying that the provided GitHub PAT has the '${required_scope}' scope..."
+
+    # Use curl to get the response headers from a simple API call
+    local headers
+    headers=$(curl -s -I -H "Authorization: token ${token_to_check}" https://api.github.com/user)
+    
+    # Check for a 200 OK status first to ensure the token is valid at all
+    if ! echo "$headers" | grep -q -E "HTTP/(1.1|2) 200"; then
+        warn "The provided PAT is not valid or could not be used to authenticate. Please provide a valid token."
+        return 1
+    fi
+
+    # Extract the scopes from the X-OAuth-Scopes header
+    local scopes
+    scopes=$(echo "$headers" | grep -i "x-oauth-scopes:" | awk -F': ' '{print $2}' | tr -d '\r')
+
+    # Check if the required scope is in the list of scopes
+    if [[ "$scopes" == *"$required_scope"* ]]; then
+        success "PAT has the required '${required_scope}' scope."
+        return 0
+    else
+        warn "The provided PAT is missing the required '${required_scope}' scope."
+        warn "Current scopes found: ${scopes:-'None'}"
+        warn "Please generate a new PAT with the 'read:packages' scope from https://github.com/settings/tokens"
+        return 1
+    fi
+}
+
 # --- Source Environment Variables ---
 if [ ! -f "../arc_env.sh" ]; then
     error "Configuration file 'arc_env.sh' not found. Please create it before running this script."
@@ -54,6 +92,32 @@ source ../arc_env.sh
 info "Loaded configuration from arc_env.sh"
 
 # --- Function Definitions ---
+
+# Check for core dependencies
+check_deps() {
+    info "Checking for core dependencies..."
+    local missing_deps=()
+    if ! command -v curl &> /dev/null; then
+        missing_deps+=("curl")
+    fi
+    if ! command -v envsubst &> /dev/null; then
+        missing_deps+=("envsubst (from gettext package)")
+    fi
+    if ! command -v "${KUBECTL_CMD%% *}" &> /dev/null; then
+        missing_deps+=("${KUBECTL_CMD%% *}")
+    fi
+    if ! command -v "${HELM_CMD%% *}" &> /dev/null; then
+        missing_deps+=("${HELM_CMD%% *}")
+    fi
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        error "The following required tools are not installed or not in your PATH: ${missing_deps[*]}. Please install them to continue."
+    fi
+    info "All core dependencies found."
+}
 
 # Step 1: Create Namespace and Secrets
 setup_prerequisites() {
@@ -84,11 +148,16 @@ setup_prerequisites() {
             error "Private key file not found at '${GITHUB_APP_PRIVATE_KEY_PATH}'"
         fi
 
+        # FIX: Sanitize input to remove leading/trailing single/double quotes
+        # that cause parsing errors in the controller.
+        CLEAN_GITHUB_APP_ID=$(echo "${GITHUB_APP_ID}" | tr -d "'\"")
+        CLEAN_GITHUB_APP_INSTALLATION_ID=$(echo "${GITHUB_APP_INSTALLATION_ID}" | tr -d "'\"")
+
         info "Creating secret '${ARC_CONTROLLER_SECRET_NAME}' in namespace '${ARC_NAMESPACE}'..."
         ${KUBECTL_CMD} create secret generic "${ARC_CONTROLLER_SECRET_NAME}" \
             -n "${ARC_NAMESPACE}" \
-            --from-literal=github_app_id="${GITHUB_APP_ID}" \
-            --from-literal=github_app_installation_id="${GITHUB_APP_INSTALLATION_ID}" \
+            --from-literal=github_app_id="${CLEAN_GITHUB_APP_ID}" \
+            --from-literal=github_app_installation_id="${CLEAN_GITHUB_APP_INSTALLATION_ID}" \
             --from-file=github_app_private_key="${GITHUB_APP_PRIVATE_KEY_PATH}"
     fi
 
@@ -102,17 +171,35 @@ setup_prerequisites() {
         # Use environment variables if set, otherwise prompt the user.
         GITHUB_USER=${CFG_GITHUB_USER}
         GITHUB_TOKEN=${CFG_GITHUB_TOKEN}
+        
+        # Loop until we have a valid token with the correct scope
+        while true; do
+            if [ -z "$GITHUB_USER" ]; then
+                read -rp "Enter your GitHub Username: " GITHUB_USER
+            fi
+            if [ -z "$GITHUB_TOKEN" ]; then
+                echo "The PAT requires the 'read:packages' scope."
+                read -rsp "Enter your GitHub PAT: " GITHUB_TOKEN; echo ""
+            fi
 
-        if [ -z "$GITHUB_USER" ]; then 
-            echo "The PAT requires the 'read:packages' scope."
-            read -rp "Enter your GitHub Username: " GITHUB_USER; 
-        fi
-        if [ -z "$GITHUB_TOKEN" ]; then read -rsp "Enter your GitHub PAT (read:packages): " GITHUB_TOKEN; echo ""; fi
+            if [ -z "$GITHUB_USER" ] || [ -z "$GITHUB_TOKEN" ]; then
+                error "GitHub credentials for Image Pull Secret cannot be empty."
+            fi
 
-        if [ -z "$GITHUB_USER" ] || [ -z "$GITHUB_TOKEN" ]; then
-            error "GitHub credentials for Image Pull Secret cannot be empty."
-        fi
-
+            # Verify the token's scopes
+            if verify_github_pat_scopes "$GITHUB_TOKEN"; then
+                break # Exit loop if token is valid
+            else
+                # If non-interactive and failed, exit.
+                if [ -n "$CFG_GITHUB_TOKEN" ]; then
+                    error "The pre-configured GITHUB_TOKEN in arc_env.sh is invalid or missing the 'read:packages' scope."
+                fi
+                # Reset token to re-prompt the user
+                GITHUB_TOKEN=""
+                warn "Please try again."
+            fi
+        done
+        
         info "Creating 'ghcr-io-pull-secret' in namespace '${ARC_NAMESPACE}'..."
         ${KUBECTL_CMD} create secret docker-registry ghcr-io-pull-secret \
             --namespace="${ARC_NAMESPACE}" \
@@ -122,9 +209,24 @@ setup_prerequisites() {
             --dry-run=client -o yaml | ${KUBECTL_CMD} apply -f -
     fi
     
-    info "Patching service account 'default' in '${ARC_NAMESPACE}' to use the image pull secret..."
+    info "Patching service account in '${ARC_NAMESPACE}' to use the image pull secret..."
     ${KUBECTL_CMD} patch serviceaccount default -n "${ARC_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-io-pull-secret"}]}'
     
+    # Also ensure the secret is available for the runners themselves if they are in a different namespace.
+    if [[ "${ARC_NAMESPACE}" != "${RUNNER_NAMESPACE}" ]]; then
+        info "Runner namespace ('${RUNNER_NAMESPACE}') is different from ARC namespace. Ensuring image pull secret is synced."
+
+        # To make this copy idempotent and avoid conflicts, we get the secret, strip server-managed fields with jq,
+        # update the namespace, and then apply it. This safely creates or updates the secret in the target namespace.
+        info "Copying/updating image pull secret 'ghcr-io-pull-secret' to '${RUNNER_NAMESPACE}'..."
+        ${KUBECTL_CMD} get secret ghcr-io-pull-secret -n "${ARC_NAMESPACE}" -o json | \
+            jq --arg new_ns "${RUNNER_NAMESPACE}" 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.selfLink, .metadata.managedFields) | .metadata.namespace = $new_ns' | \
+            ${KUBECTL_CMD} apply -f -
+
+        info "Patching service account in '${RUNNER_NAMESPACE}' to use the image pull secret..."
+        ${KUBECTL_CMD} patch serviceaccount default -n "${RUNNER_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-io-pull-secret"}]}'
+    fi
+
     info "Prerequisites configured successfully."
 }
 
@@ -251,7 +353,9 @@ configure_github_extras() {
     read -rp "Do you want to automatically configure secrets in the '${GITHUB_REPOSITORY}' repository? (y/N): " response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         info "Logging into GitHub CLI..."
-        gh auth login -h github.com -p https --web
+        # Use device-based login without attempting to open a browser,
+        # which is suitable for headless servers.
+        gh auth login -h github.com -p https
 
         info "Configuring secrets in '${GITHUB_REPOSITORY}'..."
 
@@ -293,7 +397,7 @@ configure_github_extras() {
 
     mkdir -p "${GENERATED_WORKFLOW_BASE_DIR}"
 
-    local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME}"
+    local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME:-deploy.yaml}"
     info "Substituting variables and saving to '${GENERATED_WORKFLOW_FULL_PATH}'..."
     export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE
 
@@ -317,8 +421,12 @@ cleanup() {
     ${KUBECTL_CMD} delete runnerdeployment "${RUNNER_DEPLOYMENT_NAME}" -n "${RUNNER_NAMESPACE}" --ignore-not-found=true
 
     info "Uninstalling Helm release '${ARC_HELM_RELEASE_NAME}'..."
-    ${HELM_CMD} uninstall "${ARC_HELM_RELEASE_NAME}" -n "${ARC_NAMESPACE}" --wait
-
+    if ${HELM_CMD} status "${ARC_HELM_RELEASE_NAME}" -n "${ARC_NAMESPACE}" &>/dev/null; then
+        ${HELM_CMD} uninstall "${ARC_HELM_RELEASE_NAME}" -n "${ARC_NAMESPACE}" --wait
+    else
+        warn "Helm release '${ARC_HELM_RELEASE_NAME}' not found. Skipping uninstall."
+    fi
+    
     info "Removing ARC Helm repository '${ARC_HELM_REPO_NAME}' from local configuration..."
     ${HELM_CMD} repo remove "${ARC_HELM_REPO_NAME}" || warn "Could not remove Helm repo '${ARC_HELM_REPO_NAME}'. It might have been removed already."
 
@@ -352,6 +460,8 @@ main() {
         cleanup
         exit 0
     fi
+
+    check_deps
 
     # Run setup steps sequentially
     setup_prerequisites
