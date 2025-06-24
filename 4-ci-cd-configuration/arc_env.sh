@@ -35,6 +35,12 @@ CFG_GITHUB_APP_PRIVATE_KEY_PATH=""
 CFG_GITHUB_USER=""
 CFG_GITHUB_TOKEN=""
 
+# Harbor credentials for GitHub Actions secrets (used by setup_arc.sh)
+# These are used to automatically configure secrets in your GitHub repository.
+CFG_HARBOR_URL="" # e.g., harbor.your-domain.com
+CFG_HARBOR_USERNAME="" # e.g., robot$my-project+builder
+CFG_HARBOR_PASSWORD="" # The robot account token
+
 
 # Name for your RunnerDeployment resource
 # Default is derived from GITHUB_REPOSITORY (e.g., your-repo-name-runner-deployment)

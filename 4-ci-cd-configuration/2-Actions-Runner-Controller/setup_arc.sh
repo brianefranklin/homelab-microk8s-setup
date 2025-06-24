@@ -213,26 +213,65 @@ deploy_runner() {
 configure_github_extras() {
     info "--- Step 4: Configuring GitHub Secrets & Workflow ---"
 
-    if ! command -v gh &> /dev/null || ! command -v jq &> /dev/null; then
-        warn "'gh' CLI or 'jq' is not installed. Skipping automatic GitHub secret configuration and workflow generation."
-        warn "You will need to configure the required secrets in your repository manually."
-        return 0
+    local missing_packages=()
+    if ! command -v gh &> /dev/null; then
+        missing_packages+=("gh")
+    fi
+    if ! command -v jq &> /dev/null; then
+        missing_packages+=("jq")
     fi
 
+    if [ ${#missing_packages[@]} -gt 0 ]; then
+        warn "The following required tools are not installed: ${missing_packages[*]}. They are needed for automatic GitHub secret configuration."
+        read -rp "Do you want to attempt to install them now using 'apt'? (Y/n): " install_response
+        install_response=${install_response:-y} # Default to 'y'
+
+        if [[ "$install_response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            info "Attempting to install missing packages via apt..."
+            if ! sudo -n true 2>/dev/null; then
+                info "This script needs sudo privileges to install packages. Please enter your password."
+            fi
+            sudo apt-get update -y || warn "Failed to update apt package lists. Continuing with install attempt..."
+            
+            info "Running: sudo apt-get install -y ${missing_packages[*]}"
+            sudo apt-get install -y "${missing_packages[@]}" || error "Failed to install required packages. Please try installing them manually."
+
+            # Re-check after installation to ensure they are now in the PATH
+            if ! command -v gh &> /dev/null || ! command -v jq &> /dev/null; then
+                error "Installation seems to have failed or commands are still not available in PATH. Please install 'gh' and 'jq' manually and re-run."
+            fi
+            info "Successfully installed required tools."
+        else
+            warn "Skipping automatic GitHub secret configuration and workflow generation because required tools are missing."
+            warn "You will need to configure the required secrets in your repository manually."
+            return 0
+        fi
+    fi
+    
     read -rp "Do you want to automatically configure secrets in the '${GITHUB_REPOSITORY}' repository? (y/N): " response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         info "Logging into GitHub CLI..."
         gh auth login -h github.com -p https --web
 
         info "Configuring secrets in '${GITHUB_REPOSITORY}'..."
-        read -rp "Enter your Harbor registry URL (e.g., my-harbor.my-domain.com): " HARBOR_URL
-        read -rp "Enter your Harbor username for the secret HARBOR_USERNAME: " HARBOR_USERNAME
-        read -rsp "Enter Harbor password/robot secret: " HARBOR_PASSWORD
-        echo ""
-        
-        gh secret set HARBOR_URL --body "${HARBOR_URL}" --repo "${GITHUB_REPOSITORY}"
-        gh secret set HARBOR_USERNAME --body "${HARBOR_USERNAME}" --repo "${GITHUB_REPOSITORY}"
-        gh secret set HARBOR_PASSWORD --body "${HARBOR_PASSWORD}" --repo "${GITHUB_REPOSITORY}"
+
+        # Use environment variables from arc_env.sh if set, otherwise prompt the user.
+        HARBOR_URL=${CFG_HARBOR_URL}
+        HARBOR_USERNAME=${CFG_HARBOR_USERNAME}
+        HARBOR_PASSWORD=${CFG_HARBOR_PASSWORD}
+
+        if [ -z "$HARBOR_URL" ]; then read -rp "Enter your Harbor registry URL (e.g., my-harbor.my-domain.com): " HARBOR_URL; fi
+        if [ -z "$HARBOR_USERNAME" ]; then read -rp "Enter your Harbor username for the secret HARBOR_USERNAME: " HARBOR_USERNAME; fi
+        if [ -z "$HARBOR_PASSWORD" ]; then read -rsp "Enter Harbor password/robot secret: " HARBOR_PASSWORD; echo ""; fi
+
+        if [ -n "$HARBOR_URL" ] && [ -n "$HARBOR_USERNAME" ] && [ -n "$HARBOR_PASSWORD" ]; then
+            gh secret set HARBOR_URL --body "${HARBOR_URL}" --repo "${GITHUB_REPOSITORY}"
+            gh secret set HARBOR_USERNAME --body "${HARBOR_USERNAME}" --repo "${GITHUB_REPOSITORY}"
+            gh secret set HARBOR_PASSWORD --body "${HARBOR_PASSWORD}" --repo "${GITHUB_REPOSITORY}"
+            info "Secrets HARBOR_URL, HARBOR_USERNAME, and HARBOR_PASSWORD have been set."
+        else
+            warn "One or more Harbor credentials were not provided. Skipping Harbor secret creation."
+        fi
 
         info "Generating Kubeconfig for GitHub Actions..."
         # WARNING: The following method of generating a kubeconfig is simple and works for many
@@ -242,25 +281,24 @@ configure_github_extras() {
         # grant it limited permissions, and use its long-lived token as the secret.
         KUBECONFIG_CONTENT=$(${KUBECTL_CMD} config view --raw)
         gh secret set KUBE_CONFIG --body "${KUBECONFIG_CONTENT}" --repo "${GITHUB_REPOSITORY}"
-        info "Secrets HARBOR_URL, HARBOR_USERNAME, HARBOR_PASSWORD, and KUBE_CONFIG have been set."
+        info "Secret KUBE_CONFIG has been set."
     else
         warn "Skipping automatic secret configuration."
     fi
 
-    info "Generating sample GitHub Actions workflow file..."
+    info "Generating sample GitHub Actions workflow file from '${WORKFLOW_TEMPLATE_FILE}'..."
     if [ ! -f "${WORKFLOW_TEMPLATE_FILE}" ]; then
         error "Workflow template file not found at '${WORKFLOW_TEMPLATE_FILE}'"
     fi
 
-    GENERATED_WORKFLOW_DIR=$(dirname "${GENERATED_WORKFLOW_BASE_DIR}/${WORKFLOW_TEMPLATE_FILE}")
-    mkdir -p "${GENERATED_WORKFLOW_DIR}"
+    mkdir -p "${GENERATED_WORKFLOW_BASE_DIR}"
 
-    GENERATED_WORKFLOW_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${WORKFLOW_TEMPLATE_FILE}"
-    info "Substituting variables into '${WORKFLOW_TEMPLATE_FILE}'..."
+    local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME}"
+    info "Substituting variables and saving to '${GENERATED_WORKFLOW_FULL_PATH}'..."
     export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE
 
-    envsubst < "${WORKFLOW_TEMPLATE_FILE}" > "${GENERATED_WORKFLOW_PATH}"
-    info "Generated workflow file at '${GENERATED_WORKFLOW_PATH}'"
+    envsubst < "${WORKFLOW_TEMPLATE_FILE}" > "${GENERATED_WORKFLOW_FULL_PATH}"
+    info "Generated workflow file at '${GENERATED_WORKFLOW_FULL_PATH}'"
     info "Please review this file and commit it to your repository's .github/workflows/ directory."
 
 }
@@ -281,6 +319,9 @@ cleanup() {
     info "Uninstalling Helm release '${ARC_HELM_RELEASE_NAME}'..."
     ${HELM_CMD} uninstall "${ARC_HELM_RELEASE_NAME}" -n "${ARC_NAMESPACE}" --wait
 
+    info "Removing ARC Helm repository '${ARC_HELM_REPO_NAME}' from local configuration..."
+    ${HELM_CMD} repo remove "${ARC_HELM_REPO_NAME}" || warn "Could not remove Helm repo '${ARC_HELM_REPO_NAME}'. It might have been removed already."
+
     info "Deleting ARC controller secret '${ARC_CONTROLLER_SECRET_NAME}'..."
     ${KUBECTL_CMD} delete secret "${ARC_CONTROLLER_SECRET_NAME}" -n "${ARC_NAMESPACE}" --ignore-not-found=true
     
@@ -293,6 +334,11 @@ cleanup() {
     info "Deleting namespace '${RUNNER_NAMESPACE}' if it's not 'default'..."
     if [[ "${RUNNER_NAMESPACE}" != "default" ]]; then
        ${KUBECTL_CMD} delete namespace "${RUNNER_NAMESPACE}" --ignore-not-found=true
+    fi
+
+    info "Deleting generated workflow directory '${GENERATED_WORKFLOW_BASE_DIR}'..."
+    if [ -d "${GENERATED_WORKFLOW_BASE_DIR}" ]; then
+        rm -rf "${GENERATED_WORKFLOW_BASE_DIR}"
     fi
 
     info "Cleanup complete."
