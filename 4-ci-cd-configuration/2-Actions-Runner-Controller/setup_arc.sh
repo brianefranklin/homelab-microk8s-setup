@@ -164,9 +164,33 @@ install_arc() {
 deploy_runner() {
     info "--- Step 3: Deploying the RunnerDeployment ---"
 
-    # FIX: Add a delay to allow the webhook service to fully initialize.
-    info "Waiting for 15 seconds to allow the ARC webhook to become fully operational..."
-    sleep 15
+    # FIX: Actively wait for the webhook to be ready instead of using a fixed sleep.
+    info "Waiting for ARC webhook to be ready..."
+    webhook_service_name="${ARC_HELM_RELEASE_NAME}-webhook"
+    timeout_seconds=120
+    start_time=$(date +%s)
+
+    while true; do
+        # Check if the endpoints for the webhook service have been populated.
+        # The 'subsets' field will be non-empty when the pod is ready and registered.
+        endpoints_ready=$(${KUBECTL_CMD} get endpoints -n "${ARC_NAMESPACE}" "${webhook_service_name}" -o jsonpath='{.subsets}' 2>/dev/null)
+
+        if [ -n "$endpoints_ready" ]; then
+            info "ARC webhook is ready."
+            break
+        fi
+
+        current_time=$(date +%s)
+        elapsed_time=$((current_time - start_time))
+
+        if [ "$elapsed_time" -ge "$timeout_seconds" ]; then
+            error "Timed out waiting for ARC webhook to become available."
+        fi
+
+        info "Webhook not ready yet, checking again in 5 seconds..."
+        sleep 5
+    done
+
 
     if [ ! -f "${RUNNER_DEPLOYMENT_TEMPLATE_FILE}" ]; then
         error "Runner deployment template file not found at '${RUNNER_DEPLOYMENT_TEMPLATE_FILE}'"
@@ -297,4 +321,3 @@ main() {
 
 # Pass all script arguments to main
 main "$@"
-
