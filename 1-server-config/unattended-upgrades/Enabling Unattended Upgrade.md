@@ -13,7 +13,7 @@ The script performs the following actions:
     *   Enable `Unattended-Upgrade::Remove-Unused-Dependencies "true";`
     *   Enable `Unattended-Upgrade::Automatic-Reboot "true";`
     *   Enable `Unattended-Upgrade::Automatic-Reboot-WithUsers "true";` (Allows reboot even if users are logged in)
-    *   Set `Unattended-Upgrade::Automatic-Reboot-Time "04:00";`
+    *   Set `Unattended-Upgrade::Automatic-Reboot-Time "05:00";`
     *   Set `Acquire::http::Dl-Limit "50000";` (Download limit in KB/sec, e.g., 50MB/s)
 5.  **Verification**:
     *   Displays a `diff` between the backup and the newly modified configuration file.
@@ -54,7 +54,7 @@ The script will output the backup location, confirm updates, show the changes ma
 ## Important Notes
 
 *   **Backup**: A backup of your original `50unattended-upgrades` configuration is created in your home directory (e.g., `~/50unattended-upgrades.bak.YYYYMMDDHHMMSS`).
-*   **Automatic Reboots**: This script configures the system to reboot automatically at 4 AM if updates require it. Ensure this is acceptable for your environment.
+*   **Automatic Reboots**: This script configures the system to reboot automatically at 5 AM if updates require it. Ensure this is acceptable for your environment.
 *   **Review Changes**: Pay attention to the `diff` output to understand exactly what changes were made to your system's configuration.
 *   **Dry Run**: The `--dry-run` command at the end helps verify the configuration without actually performing upgrades. Check its output for any errors or warnings. (This command also applies the configuraiton changes by forcing unattended-upgrades to read the current configuration file. )
 
