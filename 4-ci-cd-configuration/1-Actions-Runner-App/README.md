@@ -1,65 +1,78 @@
-# GitHub App Creation Script for Actions Runner Controller (ARC)
+# Creating a GitHub App for Actions Runner Controller (ARC)
 
-The `ui-create-arc-app.sh` script guides an administrator through the process of creating a **repository-level GitHub App** using the GitHub web interface. This app is specifically configured with the necessary permissions for the Actions Runner Controller (ARC) to manage self-hosted runners for a single GitHub repository.
+This guide outlines the manual steps required to create a **repository-level GitHub App**. This app is essential for the Actions Runner Controller (ARC) to securely authenticate with the GitHub API and manage self-hosted runners.
 
-After the app is created and installed via the UI, the script prompts the user for the App ID, Webhook Secret, and the path to the downloaded private key file. It then uses this information to generate the final `kubectl` command to create the required Kubernetes secret for ARC.
+You will need to follow these steps to gather three crucial pieces of information that the main `setup_arc.sh` script will ask for:
+1.  **App ID**
+2.  **Installation ID**
+3.  **Private Key** (as a downloaded `.pem` file)
 
-## Features
+> **Note on Deprecation:** The old `ui-create-arc-app.sh` script is now deprecated. Its functionality has been fully integrated into the main `../2-Actions-Runner-Controller/setup_arc.sh` script for a more streamlined and interactive experience.
 
-*   **Guided Setup**: Provides clear, step-by-step instructions for the manual browser-based part of the GitHub App creation and installation.
-*   **Clear Instructions**: Details exactly what to enter in each field of the GitHub App registration form, including the correct permissions for ARC.
-*   **Secure Credential Handling**: Prompts for credentials and the path to the private key file, using the `--from-file` flag for `kubectl` to ensure the key is handled correctly.
-*   **Kubernetes Secret Generation**: Outputs the final `kubectl` command needed to create the Kubernetes secret (default name `controller-manager`, default namespace `actions-runner-system`) for ARC.
+## Step 1: Register a New GitHub App
 
-## Prerequisites
+1.  Navigate to your GitHub repository, then go to **Settings** > **Developer settings** > **GitHub Apps**.
+2.  Click **New GitHub App**.
+3.  Fill out the registration form with the following details:
+    *   **GitHub App name**: Give it a descriptive name, e.g., `my-repo-arc-runners`.
+    *   **Homepage URL**: You can use the URL of your GitHub repository.
+    *   **Webhook**: **Uncheck** the "Active" checkbox. The current setup uses the Installation ID and does not require a webhook.
 
-*   **`bash`**: The script is a bash shell script.
-*   **`curl`**: Used to make API requests to GitHub.
-*   **`jq`**: Used to parse JSON responses from GitHub and to URL-encode the manifest.
-*   Access to a Kubernetes cluster and a configured `kubectl` (or equivalent, like `microk8s.kubectl`).
+## Step 2: Configure Permissions
 
-## Configuration
+Scroll down to the "Repository permissions" section. This is the most critical part. Grant the following permissions:
 
-All configuration is handled in the `../arc_env.sh` file. Before running the script, you **must** ensure that `GITHUB_REPOSITORY` and other variables in `arc_env.sh` are set correctly.
+*   **Actions**: `Read and write`
+    *   *Reason: Allows ARC to manage runners and check workflow run status.*
+*   **Administration**: `Read and write`
+    *   *Reason: Allows ARC to register and unregister self-hosted runners against the repository.*
+*   **Checks**: `Read and write`
+    *   *Reason: Allows runners to report check run status back to GitHub.*
+*   **Metadata**: `Read-only` (This is a default requirement)
+    *   *Reason: Required by the GitHub API for basic app information.*
 
-## Usage
+Leave all other permissions as "No access".
 
-1.  **Configure the environment**: Edit `../arc_env.sh` and set the `GITHUB_REPOSITORY` and other variables as needed.
-2.  **Make the script executable**:
-    ```bash
-    chmod +x ui-create-arc-app.sh
-    ```
-3.  **Run the script**:
-    ```bash
-    ./ui-create-arc-app.sh
-    ```
-4.  **Follow the on-screen instructions**:
-    *   The script will provide a URL to open in your browser to begin creating a new GitHub App.
-    *   It will then list all the values you need to enter into the GitHub UI form, including permissions and webhook settings.
-    *   After creating the app, you will be instructed to:
-        *   Generate and download a private key (`.pem` file).
-        *   Note the App ID.
-        *   Note the Webhook Secret.
-        *   Install the app on your target repository.
+## Step 3: Create and Install the App
 
-5.  **Provide Credentials to the Script**:
-    *   The script will prompt you to enter the App ID, Webhook Secret, and the full path to the `.pem` file you downloaded.
+1.  Under "Where can this GitHub App be installed?", select **Only on this account**.
+2.  Click **Create GitHub App**.
 
-6.  **Create the Kubernetes Secret**:
-    *   Copy the entire `kubectl` command provided by the script.
-    *   Run this command in your terminal against the Kubernetes cluster where ARC is or will be installed. This creates the necessary secret for ARC to authenticate with GitHub.
+You will be redirected to the app's settings page. Now you need to gather the required credentials.
 
-    Example output:
-    ```
-    --------------------------------------------------------------------------------
-    microk8s.kubectl create secret generic controller-manager \
-      --namespace=actions-runner-system \
-      --from-literal=github_app_id="1234567" \
-      --from-literal=github_webhook_secret="a_very_secret_webhook_string" \
-      --from-file=github_private_key="/path/to/your/downloaded-private-key.pem"
-    --------------------------------------------------------------------------------
-    ```
+## Step 4: Gather Credentials
 
-## Important Notes
+On the app's settings page:
 
-*   **Private Key Security**: The private key you download is highly sensitive. The `kubectl` command uses it to create a secret. Ensure your Kubernetes secrets are managed securely and handle the `.pem` file with care.
+1.  **Note the App ID**: It is displayed at the top of the "General" settings page.
+
+2.  **Generate a Private Key**:
+    *   Scroll down to the "Private keys" section.
+    *   Click **Generate a private key**.
+    *   A `.pem` file will be automatically downloaded by your browser. **Save this file in a secure location.** You will only be able to download it once.
+
+3.  **Install the App**:
+    *   In the left sidebar, click on **Install App**.
+    *   Click **Install** next to your account name.
+    *   On the next screen, select **Only select repositories** and choose the repository where you want to run self-hosted runners.
+    *   Click **Install**.
+
+4.  **Note the Installation ID**:
+    *   After installing, you will be redirected to a URL like:
+      `https://github.com/settings/installations/12345678`
+    *   The number at the end of the URL is your **Installation ID**.
+
+## Next Steps
+
+You should now have:
+*   The **App ID** (e.g., `123456`).
+*   The **Installation ID** (e.g., `12345678`).
+*   The path to your downloaded **private key file** (e.g., `/home/user/downloads/my-repo-arc-runners.2023-10-27.private-key.pem`).
+
+With these three pieces of information, you are ready to run the main setup script. Navigate to the `2-Actions-Runner-Controller` directory and execute:
+
+```bash
+./setup_arc.sh
+```
+
+The script will prompt you for these values to automatically create the required Kubernetes secret for ARC.
