@@ -109,14 +109,15 @@ prompt_user() {
     fi
 
     # HARBOR_ADMIN_PASS
+    local admin_pass_source_info="" # To store how the password was obtained
+
     if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
         # Attempt to retrieve from Kubernetes secret if HARBOR_ADMIN_PASS is not set
         # HARBOR_INSTANCE_NAME and KUBECTL_CMD are expected to be set from harbor_env.sh
         if [[ -n "$HARBOR_INSTANCE_NAME" && -n "$KUBECTL_CMD" ]]; then
             local k8s_secret_name="${HARBOR_INSTANCE_NAME}-admin-password"
             local k8s_namespace="${HARBOR_INSTANCE_NAME}"
-
-            info "HARBOR_ADMIN_PASS not set. Attempting to retrieve from Kubernetes secret '$k8s_secret_name' in namespace '$k8s_namespace'..."
+            info "Attempting to retrieve Harbor Admin Password from Kubernetes secret '$k8s_secret_name' in namespace '$k8s_namespace'..."
             
             local fetched_password
             # Suppress stderr for kubectl get secret to handle "not found" gracefully
@@ -124,27 +125,40 @@ prompt_user() {
 
             if [[ -n "$fetched_password" ]]; then
                 HARBOR_ADMIN_PASS="$fetched_password"
-                success "Successfully retrieved Harbor Admin Password from Kubernetes secret."
+                admin_pass_source_info="was retrieved from Kubernetes secret '$k8s_secret_name' in namespace '$k8s_namespace'"
             else
-                warn "Could not retrieve password from Kubernetes secret (secret not found, key missing, or permission issue)."
-                # Fall through to manual prompt
+                warn "Could not retrieve password from Kubernetes secret (secret not found, key missing, or permission issue). Will prompt if necessary."
             fi
         else
             warn "HARBOR_INSTANCE_NAME or KUBECTL_CMD is not set (likely missing from harbor_env.sh)."
-            warn "Cannot attempt to read Harbor admin password from Kubernetes secret. Please provide it manually."
+            warn "Cannot attempt to read Harbor admin password from Kubernetes secret. Will prompt if necessary."
         fi
-    fi
 
-    # If still empty after attempting to read from secret (or if pre-set was empty), prompt the user
-    if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
-        read -sp "Enter Harbor Admin Password (will not be echoed): " HARBOR_ADMIN_PASS
-        echo # Newline after secret input
+        # If still empty after attempting to read from secret, prompt the user
+        if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
+            local HARBOR_ADMIN_PASS_INPUT=""
+            read -sp "Enter Harbor Admin Password (will not be echoed): " HARBOR_ADMIN_PASS_INPUT
+            echo # Newline after secret input
+            if [[ -n "$HARBOR_ADMIN_PASS_INPUT" ]]; then
+                HARBOR_ADMIN_PASS="$HARBOR_ADMIN_PASS_INPUT"
+                admin_pass_source_info="was provided manually by the user"
+            fi
+        fi
     else
-        info "Using pre-set HARBOR_ADMIN_PASS (hidden)."
+        admin_pass_source_info="was pre-set (e.g., from harbor_env.sh or environment)"
     fi
 
+    # Final check and logging for HARBOR_ADMIN_PASS source
     if [[ -z "$HARBOR_ADMIN_PASS" ]]; then
         fail "Harbor Admin Password cannot be empty."
+    else
+        if [[ -n "$admin_pass_source_info" ]]; then
+            info "Harbor Admin Password $admin_pass_source_info (value is hidden)."
+        else
+            # This case implies the password was set but the source wasn't explicitly tracked by the new logic.
+            # This should ideally not be hit if the password is set through one of the handled paths.
+            info "Harbor Admin Password is set (source not explicitly tracked by this script's logic, value is hidden)."
+        fi
     fi
 
     # PROJECT_NAME
@@ -207,10 +221,10 @@ delete_other_projects_if_requested() {
         local project_id_to_delete=$(echo "$project_json" | jq -r '.project_id')
         local project_name_to_delete=$(echo "$project_json" | jq -r '.name')
 
-        # if [[ "$project_name_to_delete" == "library" ]]; then
-        #     info "Skipping deletion of 'library' project." # This line is now effectively removed
-        #     continue
-        # fi
+        if [[ "$project_name_to_delete" == "library" ]]; then
+            info "Skipping deletion of the default 'library' project."
+            continue
+        fi
 
         if [[ "$project_name_to_delete" == "$PROJECT_NAME" ]]; then
             info "Skipping deletion of the target project '$PROJECT_NAME' in this phase."
