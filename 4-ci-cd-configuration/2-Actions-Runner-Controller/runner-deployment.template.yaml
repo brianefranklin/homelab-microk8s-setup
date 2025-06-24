@@ -1,0 +1,10 @@
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: ${RUNNER_DEPLOYMENT_NAME}
+  namespace: ${RUNNER_NAMESPACE}
+spec:
+  replicas: ${RUNNER_REPLICAS}
+  template:
+    spec:
+      repository: ${GITHUB_REPOSITORY}
