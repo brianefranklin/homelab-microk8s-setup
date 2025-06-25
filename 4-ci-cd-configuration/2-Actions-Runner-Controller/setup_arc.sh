@@ -230,6 +230,59 @@ setup_prerequisites() {
         echo "$secret_yaml" | ${KUBECTL_CMD} apply -f -
     fi
     
+    # Create Harbor Image Pull Secret for application deployments
+    info "Checking for Harbor image pull secret 'harbor-credentials' in namespace '${RUNNER_NAMESPACE}'..."
+    if ${KUBECTL_CMD} get secret "harbor-credentials" -n "${RUNNER_NAMESPACE}" &>/dev/null; then
+        warn "Secret 'harbor-credentials' already exists in '${RUNNER_NAMESPACE}'. Skipping creation."
+    else
+        info "To allow Kubernetes to pull images from your private Harbor registry, a secret with Harbor credentials is required."
+        
+        # Use environment variables if set, otherwise prompt the user.
+        # These are the same variables used for GitHub secrets, so they should be populated.
+        HARBOR_URL=${CFG_HARBOR_URL}
+        HARBOR_USERNAME=${CFG_HARBOR_USERNAME}
+        HARBOR_PASSWORD=${CFG_HARBOR_PASSWORD}
+
+        # If CFG_HARBOR_URL is empty, it means it wasn't set in arc_env.sh.
+        # In that case, we need to prompt the user for all Harbor credentials.
+        # The prompts here are similar to those in configure_github_extras,
+        # but specifically for the K8s secret.
+        if [ -z "$HARBOR_URL" ]; then
+            read -rp "Enter your Harbor registry URL (e.g., harbor.your-domain.com): " HARBOR_URL
+        fi
+        if [ -z "$HARBOR_USERNAME" ]; then
+            read -rp "Enter the Harbor Robot Account Name for Kubernetes image pull (e.g., 'robot\$my-app-github-actions-builder'): " HARBOR_USERNAME
+        fi
+        if [ -z "$HARBOR_PASSWORD" ]; then
+            read -rsp "Enter Harbor password/robot secret: " HARBOR_PASSWORD; echo ""
+        fi
+
+        if [ -z "$HARBOR_URL" ] || [ -z "$HARBOR_USERNAME" ] || [ -z "$HARBOR_PASSWORD" ]; then
+            error "Harbor credentials for image pull secret cannot be empty."
+        fi
+
+        info "Creating 'harbor-credentials' secret in namespace '${RUNNER_NAMESPACE}'..."
+        local secret_yaml
+        secret_yaml=$(${KUBECTL_CMD} create secret docker-registry harbor-credentials \
+            --namespace="${RUNNER_NAMESPACE}" \
+            --docker-server="${HARBOR_URL}" \
+            --docker-username="${HARBOR_USERNAME}" \
+            --docker-password="${HARBOR_PASSWORD}" \
+            --dry-run=client -o yaml)
+        if $DEBUG_MODE; then
+            info "Applying secret YAML:\n$secret_yaml"
+        fi
+        echo "$secret_yaml" | ${KUBECTL_CMD} apply -f -
+    fi
+
+    # Patch the default service account in RUNNER_NAMESPACE to use the Harbor image pull secret.
+    # This is crucial for application pods deployed by the workflow.
+    info "Patching service account in '${RUNNER_NAMESPACE}' to use 'harbor-credentials'..."
+    # This patch command is designed to ADD the secret if it's not there, without removing others.
+    # It uses strategic merge patch to append to the imagePullSecrets array.
+    ${KUBECTL_CMD} patch serviceaccount default -n "${RUNNER_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "harbor-credentials"}]}'
+
+
     info "Waiting for the default service account to be created in '${ARC_NAMESPACE}'..."
     local timeout_seconds=60
     local end_time=$(( $(date +%s) + timeout_seconds ))
@@ -282,7 +335,10 @@ setup_prerequisites() {
         fi
         echo "$copied_secret_yaml" | ${KUBECTL_CMD} apply -f -
 
-        info "Patching service account in '${RUNNER_NAMESPACE}' to use the image pull secret..."
+        # If RUNNER_NAMESPACE is different, ensure it also has the ghcr-io-pull-secret.
+        # We need to ensure both ghcr-io-pull-secret and harbor-credentials are present.
+        info "Patching service account in '${RUNNER_NAMESPACE}' to use 'ghcr-io-pull-secret' (if not already present)..."
+        # This patch command is designed to ADD the secret if it's not there, without removing others.
         ${KUBECTL_CMD} patch serviceaccount default -n "${RUNNER_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-io-pull-secret"}]}'
     fi
 
