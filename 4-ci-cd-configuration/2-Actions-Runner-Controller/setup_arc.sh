@@ -26,6 +26,17 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
+# --- DEBUG MODE ---
+DEBUG_MODE=false
+if [[ "$1" == "--debug" ]]; then
+    DEBUG_MODE=true
+    shift # Remove --debug from arguments, so the rest of the script processes them normally
+fi
+
+if $DEBUG_MODE; then
+    set -x # Echo commands before execution
+fi
+
 # --- CONFIGURATION (for non-interactive use) ---
 # Set these variables to run the script without prompts.
 # If a variable is empty, the script will prompt for the value.
@@ -124,7 +135,12 @@ setup_prerequisites() {
     info "--- Step 1: Setting up Namespace and Secrets ---"
 
     info "Creating namespace '${ARC_NAMESPACE}' if it doesn't exist..."
-    ${KUBECTL_CMD} create namespace "${ARC_NAMESPACE}" --dry-run=client -o yaml | ${KUBECTL_CMD} apply -f -
+    local namespace_yaml
+    namespace_yaml=$(${KUBECTL_CMD} create namespace "${ARC_NAMESPACE}" --dry-run=client -o yaml)
+    if $DEBUG_MODE; then
+        info "Applying namespace YAML:\n$namespace_yaml"
+    fi
+    echo "$namespace_yaml" | ${KUBECTL_CMD} apply -f -
 
     # Create GitHub App Controller Secret
     info "Checking for GitHub App secret '${ARC_CONTROLLER_SECRET_NAME}'..."
@@ -201,12 +217,17 @@ setup_prerequisites() {
         done
         
         info "Creating 'ghcr-io-pull-secret' in namespace '${ARC_NAMESPACE}'..."
-        ${KUBECTL_CMD} create secret docker-registry ghcr-io-pull-secret \
+        local secret_yaml
+        secret_yaml=$(${KUBECTL_CMD} create secret docker-registry ghcr-io-pull-secret \
             --namespace="${ARC_NAMESPACE}" \
             --docker-server="https://ghcr.io" \
             --docker-username="${GITHUB_USER}" \
             --docker-password="${GITHUB_TOKEN}" \
-            --dry-run=client -o yaml | ${KUBECTL_CMD} apply -f -
+            --dry-run=client -o yaml)
+        if $DEBUG_MODE; then
+            info "Applying secret YAML:\n$secret_yaml"
+        fi
+        echo "$secret_yaml" | ${KUBECTL_CMD} apply -f -
     fi
     
     info "Patching service account in '${ARC_NAMESPACE}' to use the image pull secret..."
@@ -219,9 +240,13 @@ setup_prerequisites() {
         # To make this copy idempotent and avoid conflicts, we get the secret, strip server-managed fields with jq,
         # update the namespace, and then apply it. This safely creates or updates the secret in the target namespace.
         info "Copying/updating image pull secret 'ghcr-io-pull-secret' to '${RUNNER_NAMESPACE}'..."
-        ${KUBECTL_CMD} get secret ghcr-io-pull-secret -n "${ARC_NAMESPACE}" -o json | \
-            jq --arg new_ns "${RUNNER_NAMESPACE}" 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.selfLink, .metadata.managedFields) | .metadata.namespace = $new_ns' | \
-            ${KUBECTL_CMD} apply -f -
+        local copied_secret_yaml
+        copied_secret_yaml=$(${KUBECTL_CMD} get secret ghcr-io-pull-secret -n "${ARC_NAMESPACE}" -o json | \
+            jq --arg new_ns "${RUNNER_NAMESPACE}" 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.selfLink, .metadata.managedFields) | .metadata.namespace = $new_ns')
+        if $DEBUG_MODE; then
+            info "Applying copied secret YAML:\n$copied_secret_yaml"
+        fi
+        echo "$copied_secret_yaml" | ${KUBECTL_CMD} apply -f -
 
         info "Patching service account in '${RUNNER_NAMESPACE}' to use the image pull secret..."
         ${KUBECTL_CMD} patch serviceaccount default -n "${RUNNER_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-io-pull-secret"}]}'
@@ -230,6 +255,110 @@ setup_prerequisites() {
     info "Prerequisites configured successfully."
 }
 
+
+# --- Add this function to your setup_arc.sh script ---
+
+# Programmatically checks if the ARC webhook is healthy and attempts a fix if not.
+# This is designed to solve the "connect: connection refused" error on the webhook service.
+function ensure_arc_webhook_is_healthy() {
+  info "--- Starting ARC Webhook Health Check ---"
+  local webhook_svc="actions-runner-controller-webhook"
+  local arc_ns="actions-runner-system"
+  local webhook_url="https://${webhook_svc}.${arc_ns}.svc:443/healthz"
+  local tester_pod_name="webhook-tester-$(date +%s)"
+  
+  info "Creating a temporary pod '${tester_pod_name}' to test webhook connectivity..."
+  
+  # Use a here-document to create the tester pod. We use busybox for its small size.
+  # The pod is created in the same namespace as the controller.
+  cat <<EOF | ${KUBECTL_CMD} apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${tester_pod_name}
+  namespace: ${arc_ns}
+spec:
+  containers:
+  - name: tester
+    image: busybox:1.36
+    command: ["/bin/sh", "-c", "sleep 3600"]
+  restartPolicy: Never
+EOF
+
+  # Wait for the tester pod to be running
+  info "Waiting for tester pod to be ready..."
+  ${KUBECTL_CMD} wait --for=condition=Ready pod/${tester_pod_name} -n ${arc_ns} --timeout=2m
+
+  info "Performing health check against: ${webhook_url}"
+  
+  local timeout_seconds=180 # 3 minutes total timeout
+  local interval_seconds=10 # Check every 10 seconds
+  local end_time=$(( $(date +%s) + timeout_seconds ))
+  local webhook_ready=false
+
+  while [[ $(date +%s) -lt ${end_time} ]]; do
+    # We use --no-check-certificate because this is an internal, self-signed cert.
+    # We are testing L4 connectivity (connection refused) and basic L7 response, not TLS trust.
+    # The command returns exit code 0 on success (HTTP 200).
+    if ${KUBECTL_CMD} exec -n ${arc_ns} ${tester_pod_name} -- wget -q --spider --timeout=5 --no-check-certificate "${webhook_url}"; then
+      webhook_ready=true
+      success "ARC webhook is healthy and responsive."
+      break
+    else
+      warn "Webhook not ready yet. Retrying in ${interval_seconds}s..."
+      sleep ${interval_seconds}
+    fi
+  done
+
+  # Cleanup the tester pod regardless of the outcome
+  info "Cleaning up tester pod..."
+  ${KUBECTL_CMD} delete pod ${tester_pod_name} -n ${arc_ns} --ignore-not-found=true
+
+  if [[ "${webhook_ready}" = false ]]; then
+    error "ARC webhook did not become healthy within the timeout."
+    read -rp "Do you want to attempt an automated fix by re-initializing MicroK8s networking? (y/N): " response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+      attempt_microk8s_network_fix
+      # After the fix, we call this function again to re-verify.
+      ensure_arc_webhook_is_healthy
+    else
+      error "Automated fix declined. Cannot proceed."
+      exit 1
+    fi
+  fi
+}
+
+# Encapsulates the MicroK8s networking fix in its own function
+function attempt_microk8s_network_fix() {
+  warn "--- Attempting to fix MicroK8s internal networking ---"
+  info "This requires sudo and will briefly interrupt cluster networking."
+  
+  # 1. Disable Calico
+  info "Disabling Calico..."
+  sudo microk8s disable calico
+  sleep 10 # Give it a moment to tear down
+
+  # 2. Re-enable Calico. This forces a fresh configuration.
+  info "Re-enabling Calico..."
+  sudo microk8s enable calico
+  sleep 10 # Give it a moment to initialize
+
+  # 3. Re-enable DNS afterwards, as it depends on the CNI.
+  info "Re-enabling DNS..."
+  sudo microk8s enable dns
+
+  # 4. Wait for core components to be ready
+  info "Waiting for Calico and CoreDNS pods to restart..."
+  sleep 15
+  ${KUBECTL_CMD} wait --for=condition=Available deployment/coredns -n kube-system --timeout=5m
+  
+  # 5. Restart the ARC controller to ensure it uses the new network config.
+  info "Restarting the ARC controller pod..."
+  ${KUBECTL_CMD} delete pod -n ${ARC_NAMESPACE} -l app.kubernetes.io/name=actions-runner-controller
+  
+  info "Network fix applied. Waiting for ARC to become ready before re-checking..."
+  ${KUBECTL_CMD} wait --for=condition=Available --namespace ${ARC_NAMESPACE} deployment/actions-runner-controller --timeout=5m
+}
 
 # Step 2: Install the Actions Runner Controller (ARC)
 install_arc() {
@@ -260,21 +389,34 @@ install_arc() {
         --timeout=5m
 
     info "Actions Runner Controller installed successfully."
+    ensure_arc_webhook_is_healthy
 }
 
 # Step 3: Deploy the Self-Hosted Runner
 deploy_runner() {
     info "--- Step 3: Deploying the RunnerDeployment ---"
 
-    # FIX: Actively wait for the webhook to be ready instead of using a fixed sleep.
-    info "Waiting for ARC webhook to be ready..."
-    webhook_service_name="${ARC_HELM_RELEASE_NAME}-webhook"
+    # The webhook needs a TLS certificate to function. We must wait for cert-manager
+    # to issue it before the webhook can start serving traffic. This prevents the
+    # "connection refused" error when creating the RunnerDeployment.
+    info "Waiting for ARC webhook's TLS certificate to be issued by cert-manager..."
+    local cert_name="${ARC_HELM_RELEASE_NAME}-serving-cert"
+    ${KUBECTL_CMD} wait --for=condition=Ready=true \
+        --namespace "${ARC_NAMESPACE}" \
+        certificate.cert-manager.io/"${cert_name}" \
+        --timeout=5m
+    info "Webhook certificate is ready."
+
+    # Now, wait for the webhook pod to be ready and have its endpoint registered.
+    info "Waiting for ARC webhook service to have active endpoints..."
+    local webhook_service_name="${ARC_HELM_RELEASE_NAME}-webhook"
     timeout_seconds=120
     start_time=$(date +%s)
 
     while true; do
         # Check if the endpoints for the webhook service have been populated.
         # The 'subsets' field will be non-empty when the pod is ready and registered.
+        local endpoints_ready
         endpoints_ready=$(${KUBECTL_CMD} get endpoints -n "${ARC_NAMESPACE}" "${webhook_service_name}" -o jsonpath='{.subsets}' 2>/dev/null)
 
         if [ -n "$endpoints_ready" ]; then
@@ -283,7 +425,7 @@ deploy_runner() {
         fi
 
         current_time=$(date +%s)
-        elapsed_time=$((current_time - start_time))
+        local elapsed_time=$((current_time - start_time))
 
         if [ "$elapsed_time" -ge "$timeout_seconds" ]; then
             error "Timed out waiting for ARC webhook to become available."
@@ -293,19 +435,59 @@ deploy_runner() {
         sleep 5
     done
 
+    # Final check: ensure the webhook server inside the pod is actually listening.
+    # This addresses the "connection refused" error directly.
+    info "Performing active readiness check on ARC webhook endpoint..."
+    local webhook_pod_ip
+    local webhook_port="9443" # Default webhook port for ARC
+    local webhook_healthz_path="/healthz" # Common health check endpoint for Kubernetes webhooks
+    timeout_seconds=120
+    start_time=$(date +%s)
+
+    while true; do
+        # Get the IP of the ARC controller pod (which hosts the webhook)
+        webhook_pod_ip=$(${KUBECTL_CMD} get pod -l app.kubernetes.io/name=actions-runner-controller -n "${ARC_NAMESPACE}" -o jsonpath='{.items[0].status.podIP}' 2>/dev/null)
+
+        if [ -n "$webhook_pod_ip" ]; then
+            # Use curl to hit the healthz endpoint. -k for insecure (self-signed cert), --connect-timeout for quick failure
+            if curl -k --connect-timeout 5 "https://${webhook_pod_ip}:${webhook_port}${webhook_healthz_path}" &>/dev/null; then
+                success "ARC webhook endpoint is actively listening."
+                break
+            fi
+        fi
+
+        current_time=$(date +%s)
+        local elapsed_time=$((current_time - start_time))
+
+        if [ "$elapsed_time" -ge "$timeout_seconds" ]; then
+            error "Timed out waiting for ARC webhook endpoint to become actively listening."
+        fi
+
+        info "Webhook endpoint not actively listening yet, checking again in 5 seconds..."
+        sleep 5
+    done
 
     if [ ! -f "${RUNNER_DEPLOYMENT_TEMPLATE_FILE}" ]; then
         error "Runner deployment template file not found at '${RUNNER_DEPLOYMENT_TEMPLATE_FILE}'"
     fi
 
     info "Creating runner namespace '${RUNNER_NAMESPACE}' if it doesn't exist..."
-    ${KUBECTL_CMD} create namespace "${RUNNER_NAMESPACE}" --dry-run=client -o yaml | ${KUBECTL_CMD} apply -f -
+    local runner_namespace_yaml
+    runner_namespace_yaml=$(${KUBECTL_CMD} create namespace "${RUNNER_NAMESPACE}" --dry-run=client -o yaml)
+    if $DEBUG_MODE; then
+        info "Applying runner namespace YAML:\n$runner_namespace_yaml"
+    fi
+    echo "$runner_namespace_yaml" | ${KUBECTL_CMD} apply -f -
 
     info "Substituting variables into '${RUNNER_DEPLOYMENT_TEMPLATE_FILE}' and applying..."
     # Export all relevant variables for envsubst
     export GITHUB_REPOSITORY RUNNER_DEPLOYMENT_NAME RUNNER_NAMESPACE RUNNER_REPLICAS
-    
-    envsubst < "${RUNNER_DEPLOYMENT_TEMPLATE_FILE}" | ${KUBECTL_CMD} apply -f -
+    local runner_deployment_yaml
+    runner_deployment_yaml=$(envsubst < "${RUNNER_DEPLOYMENT_TEMPLATE_FILE}")
+    if $DEBUG_MODE; then
+        info "Applying RunnerDeployment YAML:\n$runner_deployment_yaml"
+    fi
+    echo "$runner_deployment_yaml" | ${KUBECTL_CMD} apply -f -
 
     info "RunnerDeployment '${RUNNER_DEPLOYMENT_NAME}' applied successfully."
     info "ARC will now provision ${RUNNER_REPLICAS} runner(s) in the '${RUNNER_NAMESPACE}' namespace."
@@ -399,7 +581,7 @@ configure_github_extras() {
 
     local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME:-deploy.yaml}"
     info "Substituting variables and saving to '${GENERATED_WORKFLOW_FULL_PATH}'..."
-    export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE
+    export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE RUNNER_DEPLOYMENT_NAME
 
     envsubst < "${WORKFLOW_TEMPLATE_FILE}" > "${GENERATED_WORKFLOW_FULL_PATH}"
     info "Generated workflow file at '${GENERATED_WORKFLOW_FULL_PATH}'"
