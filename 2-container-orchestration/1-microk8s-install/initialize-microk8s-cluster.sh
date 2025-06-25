@@ -9,10 +9,20 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# --- Configuration ---
-CERT_MANAGER_NAMESPACE="cert-manager"
-CURRENT_USER=$(whoami)
+# --- Source Environment Configuration ---
+CONFIG_FILE="../config/env.sh"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=../config/env.sh
+    source "$CONFIG_FILE"
+    echo "✅ Loaded configuration from $CONFIG_FILE"
+else
+    echo "❌ ERROR: Configuration file '$CONFIG_FILE' not found." >&2
+    echo "Please create it in the same directory as this script." >&2
+    exit 1
+fi
 
+# The user running the script, determined by the env file.
+CURRENT_USER=${TARGET_USER}
 # --- Helper Functions ---
 # Function to print a formatted header
 print_header() {
@@ -66,76 +76,105 @@ echo "User '$CURRENT_USER' is an active member of the 'microk8s' group."
 echo "Ensuring ~/.kube directory exists and has correct ownership..."
 mkdir -p "$HOME/.kube"
 sudo chown -f -R "$CURRENT_USER" "$HOME/.kube"
-
 # Add kubectl alias.
-add_alias_if_not_exists "alias kubectl='microk8s kubectl'"
+add_alias_if_not_exists "alias kubectl='${KUBECTL_CMD}'"
 
 # Wait for MicroK8s to be ready before enabling addons.
 echo "Waiting for MicroK8s to be ready..."
 microk8s status --wait-ready
 
 # Enable required addons. The 'enable' command is idempotent.
-echo "Enabling MicroK8s addons: dns, storage, ingress, helm3..."
-microk8s enable dns
-microk8s enable hostpath-storage
-microk8s enable ingress
-microk8s enable helm3 # This also handles Helm installation.
+echo "Enabling MicroK8s addons: ${MICROK8S_ADDONS[*]}..."
+for addon in "${MICROK8S_ADDONS[@]}"; do
+    echo "-> Enabling $addon"
+    microk8s enable "$addon"
+done
 
 echo "Waiting for addon components to become ready..."
-microk8s kubectl wait --for=condition=Ready pod --all -n kube-system --timeout=5m
-microk8s kubectl wait --for=condition=Ready pod --all -n ingress --timeout=5m
+${KUBECTL_CMD} wait --for=condition=Ready pod --all -n kube-system --timeout=5m
+# The ingress namespace might not exist if 'ingress' is not in the addons list.
+if [[ " ${MICROK8S_ADDONS[*]} " =~ " ingress " ]]; then
+    ${KUBECTL_CMD} wait --for=condition=Ready pod --all -n ingress --timeout=5m
+fi
 
 
 # Step 2: Configure Helm Alias
 print_header "Configuring Helm"
 
 # Add helm alias.
-add_alias_if_not_exists "alias helm='microk8s helm3'"
+add_alias_if_not_exists "alias helm='${HELM_CMD}'"
 
 echo "Verifying Helm installation..."
-microk8s helm3 version
+${HELM_CMD} version
 
 # Step 3: Install and Configure cert-manager
 print_header "Installing and Configuring cert-manager"
 
 # Add the Jetstack Helm repository if it doesn't exist.
-if ! microk8s helm3 repo list | grep -q 'https://charts.jetstack.io'; then
-    echo "Adding Jetstack Helm repository..."
-    microk8s helm3 repo add jetstack https://charts.jetstack.io
+if ! ${HELM_CMD} repo list | grep -q "${CERT_MANAGER_HELM_REPO_URL}"; then
+    echo "Adding Helm repository '${CERT_MANAGER_HELM_REPO_ALIAS}' from '${CERT_MANAGER_HELM_REPO_URL}'..."
+    ${HELM_CMD} repo add "${CERT_MANAGER_HELM_REPO_ALIAS}" "${CERT_MANAGER_HELM_REPO_URL}"
 else
-    echo "Jetstack Helm repository already exists."
+    echo "Helm repository '${CERT_MANAGER_HELM_REPO_ALIAS}' already exists."
 fi
 
 echo "Updating Helm repositories..."
-microk8s helm3 repo update
+${HELM_CMD} repo update
 
 # Use 'helm upgrade --install' to make the installation idempotent.
 # This will install the chart if it's not present, or upgrade it if it is.
 echo "Installing/Upgrading cert-manager..."
-microk8s helm3 upgrade --install cert-manager jetstack/cert-manager \
-  --namespace "$CERT_MANAGER_NAMESPACE" \
+${HELM_CMD} upgrade --install "${CERT_MANAGER_HELM_RELEASE_NAME}" "${CERT_MANAGER_HELM_CHART}" \
+  --namespace "${CERT_MANAGER_NAMESPACE}" \
   --create-namespace \
   --set crds.enabled=true
 
 echo "Waiting for cert-manager pods to be ready..."
-microk8s kubectl wait --for=condition=Ready pod --all -n "$CERT_MANAGER_NAMESPACE" --timeout=5m
+${KUBECTL_CMD} wait --for=condition=Ready pod --all -n "${CERT_MANAGER_NAMESPACE}" --timeout=5m
 
+
+# --- Final Step: AWS Secret Creation ---
+print_header "Final Step: AWS Secret Creation"
+
+# Check if the AWS secret already exists.
+if ${KUBECTL_CMD} get secret "${CERT_MANAGER_AWS_SECRET_NAME}" -n "${CERT_MANAGER_NAMESPACE}" &> /dev/null; then
+    echo "✅ AWS credentials secret '${CERT_MANAGER_AWS_SECRET_NAME}' already exists. No action needed."
+else
+    # If the secret doesn't exist, check if the environment variable is set for automatic creation.
+    # The AWS_SECRET_ACCESS_KEY is intentionally not a required variable.
+    if [ -n "${AWS_SECRET_ACCESS_KEY}" ]; then
+        echo "AWS_SECRET_ACCESS_KEY variable is set. Automatically creating the secret..."
+        ${KUBECTL_CMD} -n "${CERT_MANAGER_NAMESPACE}" create secret generic "${CERT_MANAGER_AWS_SECRET_NAME}" \
+          --from-literal="${CERT_MANAGER_AWS_SECRET_KEY_NAME}=${AWS_SECRET_ACCESS_KEY}"
+        echo "✅ AWS credentials secret '${CERT_MANAGER_AWS_SECRET_NAME}' created successfully."
+    else
+        # If the variable is not set, provide manual instructions.
+        echo "⚠️  Action Required: The AWS secret key was not provided for automatic creation."
+        echo "   The next script ('apply-clusterissuer.sh') requires this secret to exist."
+        echo "   Please create it manually by running the following commands:"
+        echo ""
+        echo "   # 1. Use the secure prompt to set the key in your shell:"
+        echo "   read -s -p \"Enter AWS Secret Access Key: \" AWS_SECRET_KEY && export AWS_SECRET_KEY"
+        echo ""
+        echo "   # 2. Run the kubectl command:"
+        echo "   ${KUBECTL_CMD} -n ${CERT_MANAGER_NAMESPACE} create secret generic ${CERT_MANAGER_AWS_SECRET_NAME} \\"
+        echo "     --from-literal=${CERT_MANAGER_AWS_SECRET_KEY_NAME}=\"\$AWS_SECRET_KEY\""
+    fi
+fi
 
 # --- Final Instructions ---
 print_header "INITIALIZATION SCRIPT COMPLETED"
 
 echo ""
-echo "All automated steps are finished. Please complete the following manual steps:"
-echo ""
 echo "1. IMPORTANT: For the 'kubectl' and 'helm' aliases to work, you must either:"
 echo "   a) Close and reopen your terminal session."
 echo "   b) Or run the following command in your current session: source ~/.bash_aliases"
 echo ""
-echo "2. Create the AWS Credentials Secret for cert-manager."
-echo "   Replace 'YOUR_AWS_SECRET_ACCESS_KEY' with your actual key and run the following command:"
-echo ""
-echo "   kubectl -n $CERT_MANAGER_NAMESPACE create secret generic harbor-letsencrypt-route53-credentials \\"
-echo "     --from-literal=harbor-letsencrypt-route53-secret-access-key='YOUR_AWS_SECRET_ACCESS_KEY'"
-echo ""
+echo "2. AWS Secret Status:"
+if ${KUBECTL_CMD} get secret "${CERT_MANAGER_AWS_SECRET_NAME}" -n "${CERT_MANAGER_NAMESPACE}" &> /dev/null; then
+    echo "   ✅ The AWS secret '${CERT_MANAGER_AWS_SECRET_NAME}' is present in the cluster."
+else
+    echo "   ❌ The AWS secret '${CERT_MANAGER_AWS_SECRET_NAME}' is NOT yet present. Please create it using the instructions above."
+fi
 
 # End of script

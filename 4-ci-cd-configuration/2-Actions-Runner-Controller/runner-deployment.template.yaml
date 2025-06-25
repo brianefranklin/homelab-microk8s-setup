@@ -8,3 +8,6 @@ spec:
   template:
     spec:
       repository: ${GITHUB_REPOSITORY}
+    metadata:
+      labels:
+        runner-deployment: ${RUNNER_DEPLOYMENT_NAME}

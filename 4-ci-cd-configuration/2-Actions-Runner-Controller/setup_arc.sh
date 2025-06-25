@@ -230,6 +230,40 @@ setup_prerequisites() {
         echo "$secret_yaml" | ${KUBECTL_CMD} apply -f -
     fi
     
+    info "Waiting for the default service account to be created in '${ARC_NAMESPACE}'..."
+    local timeout_seconds=60
+    local end_time=$(( $(date +%s) + timeout_seconds ))
+    local sa_found=false
+
+    while [[ $(date +%s) -lt ${end_time} ]]; do
+        if ${KUBECTL_CMD} get serviceaccount default -n "${ARC_NAMESPACE}" &>/dev/null; then
+            sa_found=true
+            info "Default service account found."
+            break
+        fi
+        sleep 2
+    done
+
+    if [[ "${sa_found}" = false ]]; then
+        error "Timed out waiting for the default service account in namespace '${ARC_NAMESPACE}' to be created."
+    fi
+    # <<< INSERT THIS FIX >>>
+    info "Waiting for the default service account to be created in '${RUNNER_NAMESPACE}'..."
+    local runner_sa_found=false
+    local runner_end_time=$(( $(date +%s) + 60 ))
+    while [[ $(date +%s) -lt ${runner_end_time} ]]; do
+        if ${KUBECTL_CMD} get serviceaccount default -n "${RUNNER_NAMESPACE}" &>/dev/null; then
+            runner_sa_found=true
+            break
+        fi
+        sleep 2
+    done
+    if [[ "${runner_sa_found}" = false ]]; then
+        error "Timed out waiting for the default service account in namespace '${RUNNER_NAMESPACE}'."
+    fi
+    # <<< END OF FIX >>>
+
+
     info "Patching service account in '${ARC_NAMESPACE}' to use the image pull secret..."
     ${KUBECTL_CMD} patch serviceaccount default -n "${ARC_NAMESPACE}" -p '{"imagePullSecrets": [{"name": "ghcr-io-pull-secret"}]}'
     
@@ -547,7 +581,7 @@ configure_github_extras() {
         HARBOR_PASSWORD=${CFG_HARBOR_PASSWORD}
 
         if [ -z "$HARBOR_URL" ]; then read -rp "Enter your Harbor registry URL (e.g., my-harbor.my-domain.com): " HARBOR_URL; fi
-        if [ -z "$HARBOR_USERNAME" ]; then read -rp "Enter your Harbor username for the secret HARBOR_USERNAME: " HARBOR_USERNAME; fi
+        if [ -z "$HARBOR_USERNAME" ]; then read -rp "Enter the Harbor Robot Account Name for the HARBOR_USERNAME secret (e.g., 'robot\$my-app-github-actions-builder'): " HARBOR_USERNAME; fi
         if [ -z "$HARBOR_PASSWORD" ]; then read -rsp "Enter Harbor password/robot secret: " HARBOR_PASSWORD; echo ""; fi
 
         if [ -n "$HARBOR_URL" ] && [ -n "$HARBOR_USERNAME" ] && [ -n "$HARBOR_PASSWORD" ]; then

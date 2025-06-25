@@ -1,45 +1,46 @@
 #!/bin/bash
 
-# Note that this script is designed for microk8s.kubectl NOT native kubectl.
+# --- Source Environment Configuration ---
+CONFIG_FILE="../config/env.sh"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=../config/env.sh
+    source "$CONFIG_FILE"
+    echo "✅ Loaded configuration from $CONFIG_FILE"
+else
+    echo "❌ ERROR: Configuration file '$CONFIG_FILE' not found." >&2
+    echo "Please create it in the same directory as this script." >&2
+    exit 1
+fi
 
-# --- CONFIGURE YOUR VALUES HERE ---
-# Set your email address, AWS region, hosted zone ID, and access key ID.
-export YOUR_EMAIL="exampleuser@domain.com"
-export YOUR_AWS_REGION="us-east-1"
-export YOUR_HOSTED_ZONE_ID="Z0123456789ABCDEF"
-export YOUR_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
-
-# Choose ONE OF THE FOLLOWING ACME URLs:
-export ACME_SERVER="https://acme-staging-v02.api.letsencrypt.org/directory"
-#export ACME_SERVER="https://acme-v02.api.letsencrypt.org/directory"
-
-# Define the secret name and namespace we need to check for.
-SECRET_NAME="harbor-letsencrypt-route53-credentials"
-NAMESPACE="cert-manager"
-
-# ----------------------------------
-
+# --- Validate Required Variables ---
+REQUIRED_VARS=(
+    "LETSENCRYPT_EMAIL" "AWS_REGION" "AWS_HOSTED_ZONE_ID" "AWS_ACCESS_KEY_ID" "ACME_SERVER_URL"
+    "KUBECTL_CMD" "CERT_MANAGER_NAMESPACE"
+    "CERT_MANAGER_AWS_SECRET_NAME" "CERT_MANAGER_AWS_SECRET_KEY_NAME"
+)
+for VAR_NAME in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!VAR_NAME}" ]; then
+        echo "❌ ERROR: Required variable '$VAR_NAME' is not set in '$CONFIG_FILE'." >&2
+        exit 1
+    fi
+done
 
 # --- PREREQUISITE CHECK ---
-echo "Checking for prerequisite secret '$SECRET_NAME' in namespace '$NAMESPACE'..."
+echo "Checking for prerequisite secret '$CERT_MANAGER_AWS_SECRET_NAME' in namespace '$CERT_MANAGER_NAMESPACE'..."
 
-# Use 'microk8s.kubectl get' and check its exit code.
-# The >/dev/null 2>&1 part silences the command's output so we only see our own messages.
-if ! microk8s.kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
-  # This block executes if the 'microk8s.kubectl get' command fails (secret not found).
+if ! ${KUBECTL_CMD} get secret "$CERT_MANAGER_AWS_SECRET_NAME" -n "$CERT_MANAGER_NAMESPACE" > /dev/null 2>&1; then
   echo "---"
   echo "❌ ERROR: Prerequisite secret not found."
-  echo "The ClusterIssuer requires a secret named '$SECRET_NAME' in the '$NAMESPACE' namespace."
+  echo "The ClusterIssuer requires a secret named '$CERT_MANAGER_AWS_SECRET_NAME' in the '$CERT_MANAGER_NAMESPACE' namespace."
   echo "Please create it first. Here is an example command:"
   echo
   echo "  # 1. Set your AWS secret key as an environment variable:"
   echo "  export AWS_SECRET_KEY='your-super-secret-aws-key-goes-here'"
   echo
-  echo "  # 2. Run the microk8s.kubectl command:"
-  echo "  microk8s.kubectl -n $NAMESPACE create secret generic $SECRET_NAME \\"
-  echo "    --from-literal=harbor-letsencrypt-route53-secret-access-key=\"\$AWS_SECRET_KEY\""
+  echo "  # 2. Run the kubectl command:"
+  echo "  ${KUBECTL_CMD} -n ${CERT_MANAGER_NAMESPACE} create secret generic ${CERT_MANAGER_AWS_SECRET_NAME} \\"
+  echo "    --from-literal=${CERT_MANAGER_AWS_SECRET_KEY_NAME}=\"\$AWS_SECRET_KEY\""
   echo
-  # Exit the script with an error code.
   exit 1
 fi
 
@@ -47,18 +48,24 @@ echo "✅ Prerequisite secret found. Proceeding..."
 echo "---"
 
 # --- APPLY CLUSTERISSUER ---
-
+# For compatibility with the existing letsencrypt-route53-clusterissuer.template.yaml,
+# we export variables with the names the template expects.
+export YOUR_EMAIL="${LETSENCRYPT_EMAIL}"
+export YOUR_AWS_REGION="${AWS_REGION}"
+export YOUR_HOSTED_ZONE_ID="${AWS_HOSTED_ZONE_ID}"
+export YOUR_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+export ACME_SERVER="${ACME_SERVER_URL}"
 
 echo "Applying ClusterIssuer with the following configuration:"
-echo "Email: $YOUR_EMAIL"
-echo "Region: $YOUR_AWS_REGION"
-echo "Zone ID: $YOUR_HOSTED_ZONE_ID"
-echo "Access Key ID: $YOUR_ACCESS_KEY_ID"
-echo "ACME URL: $ACME_SERVER"
+echo "Email: $LETSENCRYPT_EMAIL"
+echo "Region: $AWS_REGION"
+echo "Zone ID: $AWS_HOSTED_ZONE_ID"
+echo "Access Key ID: $AWS_ACCESS_KEY_ID"
+echo "ACME URL: $ACME_SERVER_URL"
 echo "---"
 
-# envsubst substitutes the variables in the template and pipes the resulting
-# valid YAML directly to microk8s.kubectl. The '-f -' tells microk8s.kubectl to read from stdin.
-envsubst < letsencrypt-route53-clusterissuer.template.yaml | microk8s.kubectl apply -f -
+# envsubst substitutes the exported variables in the template and pipes the resulting
+# valid YAML directly to kubectl. The '-f -' tells kubectl to read from stdin.
+envsubst < letsencrypt-route53-clusterissuer.template.yaml | ${KUBECTL_CMD} apply -f -
 
 echo "ClusterIssuer applied. Check above for errors."

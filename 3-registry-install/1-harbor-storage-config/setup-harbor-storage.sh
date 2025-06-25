@@ -29,10 +29,10 @@ for VAR_NAME in "${REQUIRED_VARS[@]}"; do
 done
 
 # --- Use Sourced Variables ---
-APP_NAME="${HARBOR_INSTANCE_NAME}"
-K8S_NAMESPACE="${HARBOR_INSTANCE_NAME}"
-HOST_PATH_BASE="${HARBOR_STORAGE_HOST_PATH_BASE}"
-VOLUME_OWNER_UID="${HARBOR_STORAGE_VOLUME_OWNER_UID}"
+export APP_NAME="${HARBOR_INSTANCE_NAME}"
+export K8S_NAMESPACE="${HARBOR_INSTANCE_NAME}"
+export HOST_PATH_BASE="${HARBOR_STORAGE_HOST_PATH_BASE}"
+export VOLUME_OWNER_UID="${HARBOR_STORAGE_VOLUME_OWNER_UID}"
 
 # --- SCRIPT LOGIC (DO NOT EDIT BELOW THIS LINE) ---
 SERVICES=("registry" "jobservice" "database" "redis" "trivy")
@@ -57,8 +57,8 @@ for SERVICE_NAME in "${SERVICES[@]}"; do
     echo "Processing storage for service: $SERVICE_NAME"
 
     # Dynamically get the storage size for the current service from HARBOR_STORAGE_*_SIZE variables
-    size_var_name="${SERVICE_NAME^^}_STORAGE_SIZE" # e.g., DATABASE_STORAGE_SIZE
-    export STORAGE_SIZE=${!size_var_name}
+    size_var_name="HARBOR_STORAGE_${SERVICE_NAME^^}_SIZE" # e.g., HARBOR_STORAGE_DATABASE_SIZE
+    export STORAGE_SIZE="${!size_var_name}"
 
     export SERVICE_NAME # Export for envsubst
     export STORAGE_CLASS_NAME="${APP_NAME}-manual-${SERVICE_NAME}"
