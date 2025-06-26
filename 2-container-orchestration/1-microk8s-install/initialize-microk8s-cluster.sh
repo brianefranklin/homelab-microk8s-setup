@@ -13,6 +13,23 @@ set -e # Exit immediately if a command exits with a non-zero status.
 CERT_MANAGER_NAMESPACE="cert-manager"
 CURRENT_USER=$(whoami)
 
+# --- Helper Functions for Logging ---
+info() {
+    echo -e "\033[0;32m[INFO]\033[0m $1"
+}
+
+warn() {
+    echo -e "\033[0;33m[WARN]\033[0m $1"
+}
+
+error() {
+    echo -e "\033[0;31m[ERROR]\033[0m $1" >&2
+    exit 1
+}
+
+success() {
+    echo -e "\033[0;32m[SUCCESS]\033[0m $1"
+}
 # --- Helper Functions ---
 # Function to print a formatted header
 print_header() {
@@ -35,6 +52,41 @@ add_alias_if_not_exists() {
     fi
 }
 
+# Ensures the host system is using iptables-legacy mode, which is required
+# by MicroK8s's networking components (kube-proxy/kubelite) to correctly
+# program firewall rules for services like NodePorts.
+ensure_iptables_legacy_mode() {
+    print_header "Verifying Host IPTables Mode for MicroK8s Compatibility"
+
+    # On modern Debian/Ubuntu systems, iptables can operate in two modes:
+    # 1. 'nft' (the new default): Rules are managed by the nftables kernel subsystem.
+    # 2. 'legacy': Rules are managed by the older, traditional iptables subsystem.
+    #
+    # MicroK8s's internal kube-proxy is compiled to write its rules to the 'legacy'
+    # tables. If the host OS is in 'nft' mode, a "split-brain" occurs: Kubernetes
+    # writes rules to one table, but the kernel only enforces the other, empty table.
+    # This leads to NodePort services being unreachable.
+
+    if ! update-alternatives --query iptables | grep -q 'Value: /usr/sbin/iptables-legacy'; then
+        warn "Host is not using iptables-legacy mode. This can cause NodePort services to fail."
+        info "Attempting to switch the system's default to iptables-legacy..."
+        
+        sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+        sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+        success "Switched iptables mode to legacy."
+        
+        info "Restarting MicroK8s to apply the new networking mode..."
+        sudo microk8s stop
+        sudo microk8s start
+        
+        info "Waiting for MicroK8s to stabilize after restart..."
+        sudo microk8s status --wait-ready
+        
+        success "MicroK8s restarted successfully with the correct iptables mode."
+    else
+        success "Host is already configured for iptables-legacy mode."
+    fi
+}
 
 # --- Main Script ---
 
@@ -44,6 +96,9 @@ print_header "Installing and Configuring MicroK8s"
 # Install MicroK8s via Snap. Snap install is idempotent.
 echo "Installing microk8s snap..."
 sudo snap install microk8s --classic
+
+# Ensure host is using iptables-legacy for MicroK8s compatibility
+ensure_iptables_legacy_mode
 
 # Add the current user to the microk8s group if not already a member.
 if ! id -nG "$CURRENT_USER" | grep -qw "microk8s"; then
