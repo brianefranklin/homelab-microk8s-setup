@@ -27,3 +27,4 @@ xcuserdata/
 *.log
 tmp/
 temp/
+/pf-server-config
