@@ -43,7 +43,7 @@ CFG_HARBOR_PASSWORD="" # The robot account token
 
 # Docker Hub credentials for GitHub Actions secrets (used by setup_arc.sh)
 # Set CFG_CONFIGURE_DOCKERHUB_SECRET to "true" to enable automatic creation of these secrets.
-CFG_CONFIGURE_DOCKERHUB_SECRET="false"
+CFG_CONFIGURE_DOCKERHUB_SECRET="true"
 CFG_DOCKERHUB_USERNAME=""
 CFG_DOCKERHUB_TOKEN="" # Use a Personal Access Token here
 
