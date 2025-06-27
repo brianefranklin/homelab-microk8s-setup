@@ -253,23 +253,51 @@ delete_other_projects_if_requested() {
     success "Finished attempting to delete other projects."
 }
 
+# --- Function to wait for Harbor to become ready ---
+wait_for_harbor_ready() {
+    info "Waiting for Harbor to become available and for TLS certificate to be ready at $HARBOR_URL..."
+    local timeout_seconds=300 # 5 minutes
+    local interval_seconds=15
+    local end_time=$(( $(date +%s) + timeout_seconds ))
+
+    while [[ $(date +%s) -lt ${end_time} ]]; do
+        # We perform an authenticated check. This verifies:
+        # 1. DNS has propagated.
+        # 2. The ingress controller is routing traffic for the hostname.
+        # 3. The TLS certificate is valid and trusted (no -k).
+        # 4. The Harbor service is up and can process authenticated requests.
+        local http_code
+        http_code=$(curl -s --connect-timeout 10 -o /dev/null -w "%{http_code}" -u "${HARBOR_ADMIN_USER}:${HARBOR_ADMIN_PASS}" "${HARBOR_URL}/api/v2.0/systeminfo")
+        local curl_exit_code=$?
+
+        if [[ "$http_code" -eq 200 ]]; then
+            success "Harbor is ready and authentication is successful."
+            return 0
+        else
+            local reason=""
+            case $curl_exit_code in
+                0) reason="Received non-200 HTTP status." ;; # Curl succeeded, but HTTP failed
+                6) reason="Could not resolve host. Waiting for DNS." ;;
+                7) reason="Failed to connect to host. Waiting for Ingress/Service." ;;
+                28) reason="Connection timed out." ;;
+                35|51|60) reason="TLS/SSL certificate issue. Waiting for cert-manager." ;;
+                *) reason="Unknown curl error (code: $curl_exit_code)." ;;
+            esac
+            info "Harbor not ready yet (HTTP: $http_code, Status: $reason). Retrying in ${interval_seconds}s..."
+        fi
+        sleep ${interval_seconds}
+    done
+
+    fail "Timed out waiting for Harbor to become ready at $HARBOR_URL."
+}
+
 # --- Main Logic ---
 main() {
     check_deps
     prompt_user
+    wait_for_harbor_ready
 
-    # Delete other projects if requested by the user
-    delete_other_projects_if_requested
-
-    # 1. Check Harbor health and authentication
-    info "Checking Harbor status at $HARBOR_URL..."
-    HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${HARBOR_ADMIN_USER}:${HARBOR_ADMIN_PASS}" "${HARBOR_URL}/api/v2.0/systeminfo")
-    if [[ "$HEALTH_STATUS" -ne 200 ]]; then
-        fail "Could not connect to Harbor or authenticate. HTTP Status: $HEALTH_STATUS. Please check URL and credentials."
-    fi
-    success "Successfully authenticated with Harbor."
-
-    # 2. Create Project
+    # 1. Create Project
     info "Creating project '$PROJECT_NAME'..."
     PROJECT_PAYLOAD=$(cat <<EOF
 {
@@ -290,6 +318,9 @@ EOF
     
     CREATE_PROJECT_HTTP_CODE=$(echo "$CREATE_PROJECT_FULL_RESPONSE" | tail -n1)
     CREATE_PROJECT_RESPONSE_BODY=$(echo "$CREATE_PROJECT_FULL_RESPONSE" | sed '$d')
+
+    # Now that Harbor is confirmed ready, we can proceed with other operations like deleting projects.
+    delete_other_projects_if_requested
 
     PROJECT_ID=""
     PROJECT_METADATA_RETENTION_ID=""
@@ -329,7 +360,7 @@ EOF
     fi
     success "Using Project ID: $PROJECT_ID for project '$PROJECT_NAME'."
 
-    # 3. Create Robot Account
+    # 2. Create Robot Account
     info "Creating robot account '$ROBOT_NAME'..."
     ROBOT_PAYLOAD=$(cat <<EOF
 {
@@ -381,7 +412,7 @@ EOF
         fail "Failed to create robot account. HTTP Status: $CREATE_ROBOT_HTTP_CODE. Response: $CREATE_ROBOT_RESPONSE_BODY"
     fi
 
-    # 4. Create Retention Policy if one doesn't exist
+    # 3. Create Retention Policy if one doesn't exist
     if [[ -n "$PROJECT_METADATA_RETENTION_ID" && "$PROJECT_METADATA_RETENTION_ID" != "null" ]]; then
         warn "Project '$PROJECT_NAME' (ID: $PROJECT_ID) already has a retention policy (Policy ID from metadata: $PROJECT_METADATA_RETENTION_ID). Skipping creation."
     else
@@ -420,7 +451,7 @@ EOF
         fi
     fi
 
-    # 5. Create Immutability Rules
+    # 4. Create Immutability Rules
     info "Checking/Creating tag immutability rules for project ID '$PROJECT_ID'..."
 
     LIST_IMMUTABLE_FULL_RESPONSE=$(curl -s -w "\n%{http_code}" -u "${HARBOR_ADMIN_USER}:${HARBOR_ADMIN_PASS}" \
@@ -490,7 +521,7 @@ EOF
         fi
     done
 
-    # 6. Schedule Garbage Collection
+    # 5. Schedule Garbage Collection
     info "Configuring system-wide garbage collection schedule (every Tuesday at 4:00 AM)..."
     GC_SCHEDULE_PAYLOAD='{ "schedule": { "type": "Weekly", "cron": "0 0 4 * * 2" } }'
 

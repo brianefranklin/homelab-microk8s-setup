@@ -237,29 +237,48 @@ setup_prerequisites() {
     else
         info "To allow Kubernetes to pull images from your private Harbor registry, a secret with Harbor credentials is required."
         
-        # Use environment variables if set, otherwise prompt the user.
-        # These are the same variables used for GitHub secrets, so they should be populated.
+        # --- Robustly prompt for Harbor credentials ---
         HARBOR_URL=${CFG_HARBOR_URL}
-        HARBOR_USERNAME=${CFG_HARBOR_USERNAME}
-        HARBOR_PASSWORD=${CFG_HARBOR_PASSWORD}
-
-        # If CFG_HARBOR_URL is empty, it means it wasn't set in arc_env.sh.
-        # In that case, we need to prompt the user for all Harbor credentials.
-        # The prompts here are similar to those in configure_github_extras,
-        # but specifically for the K8s secret.
-        if [ -z "$HARBOR_URL" ]; then
+        while [ -z "$HARBOR_URL" ]; do
             read -rp "Enter your Harbor registry URL (e.g., harbor.your-domain.com): " HARBOR_URL
-        fi
-        if [ -z "$HARBOR_USERNAME" ]; then
+            if [ -z "$HARBOR_URL" ]; then
+                warn "Harbor URL cannot be empty. Please try again."
+            fi
+        done
+
+        HARBOR_USERNAME=${CFG_HARBOR_USERNAME}
+        while [ -z "$HARBOR_USERNAME" ]; do
             read -rp "Enter the Harbor Robot Account Name for Kubernetes image pull (e.g., 'robot\$my-app-github-actions-builder'): " HARBOR_USERNAME
-        fi
-        if [ -z "$HARBOR_PASSWORD" ]; then
-            read -rsp "Enter Harbor password/robot secret: " HARBOR_PASSWORD; echo ""
+            if [ -z "$HARBOR_USERNAME" ]; then
+                warn "Harbor Robot Account Name cannot be empty. Please try again."
+            fi
+        done
+
+        HARBOR_PASSWORD=${CFG_HARBOR_PASSWORD}
+        while [ -z "$HARBOR_PASSWORD" ]; do
+            read -rsp "Enter Harbor password/robot secret (will not be echoed): " HARBOR_PASSWORD; echo ""
+            if [ -z "$HARBOR_PASSWORD" ]; then
+                warn "Harbor password cannot be empty. Please try again."
+            fi
+        done
+
+        # --- Confirmation Step ---
+        info "You have provided the following credentials for the 'harbor-credentials' secret:"
+        echo "  - Harbor URL:      $HARBOR_URL"
+        echo "  - Harbor Username: $HARBOR_USERNAME"
+        echo "  - Harbor Password: [hidden]"
+        
+        local confirm_creation
+        read -rp "Proceed with creating the secret in namespace '${RUNNER_NAMESPACE}'? [Y/n]: " confirm_creation
+        confirm_creation=${confirm_creation:-Y} # Default to Yes
+
+        if [[ ! "$confirm_creation" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            warn "Secret creation cancelled by user. Application deployments from Harbor may fail."
+            # We return 0 to allow the rest of the script to proceed if the user wishes.
+            return 0
         fi
 
-        if [ -z "$HARBOR_URL" ] || [ -z "$HARBOR_USERNAME" ] || [ -z "$HARBOR_PASSWORD" ]; then
-            error "Harbor credentials for image pull secret cannot be empty."
-        fi
+        # The original check for empty variables is now redundant due to the while loops.
 
         info "Creating 'harbor-credentials' secret in namespace '${RUNNER_NAMESPACE}'..."
         local secret_yaml

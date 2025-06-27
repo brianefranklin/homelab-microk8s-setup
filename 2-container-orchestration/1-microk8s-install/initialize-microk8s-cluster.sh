@@ -88,6 +88,47 @@ ensure_iptables_legacy_mode() {
     fi
 }
 
+# --- Function to create the AWS secret for cert-manager ---
+create_aws_secret() {
+    print_header "Creating AWS Secret for Cert-Manager DNS-01 Challenge"
+
+    # Source config file to get variable names
+    local config_file="../config/env.sh"
+    if [ ! -f "$config_file" ]; then
+        error "Configuration file '$config_file' not found. Cannot create AWS secret."
+    fi
+    # shellcheck source=../config/env.sh
+    source "$config_file"
+
+    # Check if the secret already exists
+    if ${KUBECTL_CMD} get secret "$CERT_MANAGER_AWS_SECRET_NAME" -n "$CERT_MANAGER_NAMESPACE" &>/dev/null; then
+        warn "Secret '$CERT_MANAGER_AWS_SECRET_NAME' already exists in namespace '$CERT_MANAGER_NAMESPACE'. Skipping creation."
+        return 0
+    fi
+
+    # Determine the AWS Secret Access Key
+    local aws_secret_key=""
+    if [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+        info "Using AWS_SECRET_ACCESS_KEY from environment file."
+        aws_secret_key="$AWS_SECRET_ACCESS_KEY"
+    else
+        info "AWS_SECRET_ACCESS_KEY not found in environment file."
+        read -sp "Please enter your AWS Secret Access Key (will not be echoed): " aws_secret_key
+        echo # Add a newline after the prompt
+    fi
+
+    if [ -z "$aws_secret_key" ]; then
+        error "AWS Secret Access Key was not provided. Cannot create secret."
+    fi
+
+    # Create the secret
+    info "Creating secret '$CERT_MANAGER_AWS_SECRET_NAME' in namespace '$CERT_MANAGER_NAMESPACE'..."
+    ${KUBECTL_CMD} -n "$CERT_MANAGER_NAMESPACE" create secret generic "$CERT_MANAGER_AWS_SECRET_NAME" \
+      --from-literal="$CERT_MANAGER_AWS_SECRET_KEY_NAME"="$aws_secret_key"
+
+    success "AWS secret created successfully."
+}
+
 # --- Main Script ---
 
 # Step 1: Install and Configure MicroK8s
@@ -175,22 +216,18 @@ microk8s helm3 upgrade --install cert-manager jetstack/cert-manager \
 echo "Waiting for cert-manager pods to be ready..."
 microk8s kubectl wait --for=condition=Ready pod --all -n "$CERT_MANAGER_NAMESPACE" --timeout=5m
 
+# Step 4: Create AWS Secret for Cert-Manager
+create_aws_secret
 
 # --- Final Instructions ---
 print_header "INITIALIZATION SCRIPT COMPLETED"
 
 echo ""
-echo "All automated steps are finished. Please complete the following manual steps:"
+echo "All automated steps are finished."
 echo ""
-echo "1. IMPORTANT: For the 'kubectl' and 'helm' aliases to work, you must either:"
+echo "IMPORTANT: For the 'kubectl' and 'helm' aliases to work, you must either:"
 echo "   a) Close and reopen your terminal session."
 echo "   b) Or run the following command in your current session: source ~/.bash_aliases"
-echo ""
-echo "2. Create the AWS Credentials Secret for cert-manager."
-echo "   Replace 'YOUR_AWS_SECRET_ACCESS_KEY' with your actual key and run the following command:"
-echo ""
-echo "   kubectl -n $CERT_MANAGER_NAMESPACE create secret generic harbor-letsencrypt-route53-credentials \\"
-echo "     --from-literal=harbor-letsencrypt-route53-secret-access-key='YOUR_AWS_SECRET_ACCESS_KEY'"
 echo ""
 
 # End of script

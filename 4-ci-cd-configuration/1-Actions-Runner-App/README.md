@@ -1,13 +1,11 @@
-# Creating a GitHub App for Actions Runner Controller (ARC)
+# Manual Guide: Creating a GitHub App for Actions Runner Controller (ARC)
 
 This guide outlines the manual steps required to create a **repository-level GitHub App**. This app is essential for the Actions Runner Controller (ARC) to securely authenticate with the GitHub API and manage self-hosted runners.
 
-You will need to follow these steps to gather three crucial pieces of information that the main `setup_arc.sh` script will ask for:
+Follow these steps to gather the three credentials required by the main `../2-Actions-Runner-Controller/setup_arc.sh` script:
 1.  **App ID**
 2.  **Installation ID**
 3.  **Private Key** (as a downloaded `.pem` file)
-
-> **Note on Deprecation:** The old `ui-create-arc-app.sh` script is now deprecated. Its functionality has been fully integrated into the main `../2-Actions-Runner-Controller/setup_arc.sh` script for a more streamlined and interactive experience.
 
 ## Step 1: Register a New GitHub App
 
@@ -22,14 +20,16 @@ You will need to follow these steps to gather three crucial pieces of informatio
 
 Scroll down to the "Repository permissions" section. This is the most critical part. Grant the following permissions:
 
-*   **Actions**: `Read and write`
-    *   *Reason: Allows ARC to manage runners and check workflow run status.*
 *   **Administration**: `Read and write`
     *   *Reason: Allows ARC to register and unregister self-hosted runners against the repository.*
 *   **Checks**: `Read and write`
     *   *Reason: Allows runners to report check run status back to GitHub.*
+*   **Contents**: `Read-only`
+    *   *Reason: Allows ARC to read workflow files from the repository.*
 *   **Metadata**: `Read-only` (This is a default requirement)
     *   *Reason: Required by the GitHub API for basic app information.*
+*   **Pull requests**: `Read and write`
+    *   *Reason: Allows runners to interact with pull requests (e.g., for PR-triggered workflows).*
 
 Leave all other permissions as "No access".
 

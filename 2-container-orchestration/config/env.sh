@@ -45,6 +45,9 @@ export LETSENCRYPT_EMAIL="exampleuser@domain.com"
 export AWS_REGION="us-east-1"
 export AWS_HOSTED_ZONE_ID="Z0123456789ABCDEF"
 export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+# The AWS Secret Access Key. If set, the script will use it non-interactively.
+# For security, it's recommended to leave this blank and be prompted instead.
+export AWS_SECRET_ACCESS_KEY=""
 # The AWS Secret Access Key is not stored in this file. It should be created as a Kubernetes secret.
 
 # The name of the Kubernetes secret that will hold the AWS credentials.
