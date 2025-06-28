@@ -41,6 +41,12 @@ CFG_HARBOR_URL="" # e.g., harbor.your-domain.com
 CFG_HARBOR_USERNAME="" # e.g., robot$my-project+builder
 CFG_HARBOR_PASSWORD="" # The robot account token
 
+# Docker Hub credentials for GitHub Actions secrets (used by setup_arc.sh)
+# Set CFG_CONFIGURE_DOCKERHUB_SECRET to "true" to enable automatic creation of these secrets.
+CFG_CONFIGURE_DOCKERHUB_SECRET="true"
+CFG_DOCKERHUB_USERNAME=""
+CFG_DOCKERHUB_TOKEN="" # Use a Personal Access Token here
+
 
 # Name for your RunnerDeployment resource
 # Default is derived from GITHUB_REPOSITORY (e.g., your-repo-name-runner-deployment)

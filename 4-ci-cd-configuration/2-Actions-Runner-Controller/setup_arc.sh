@@ -641,7 +641,7 @@ configure_github_extras() {
         fi
     fi
     
-    read -rp "Do you want to automatically configure secrets in the '${GITHUB_REPOSITORY}' repository? (y/N): " response
+    read -rp "Do you want to automatically configure GitHub repository secrets (Harbor, Docker Hub, Kubeconfig)? (y/N): " response
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         info "Logging into GitHub CLI..."
         # Use device-based login without attempting to open a browser,
@@ -667,6 +667,27 @@ configure_github_extras() {
         else
             warn "One or more Harbor credentials were not provided. Skipping Harbor secret creation."
         fi
+
+        # Create Docker Hub secrets if enabled
+        if [[ "${CFG_CONFIGURE_DOCKERHUB_SECRET,,}" == "true" || "${CFG_CONFIGURE_DOCKERHUB_SECRET,,}" == "yes" ]]; then
+            info "Configuring Docker Hub secrets as requested..."
+            DOCKERHUB_USERNAME=${CFG_DOCKERHUB_USERNAME}
+            DOCKERHUB_TOKEN=${CFG_DOCKERHUB_TOKEN}
+
+            if [ -z "$DOCKERHUB_USERNAME" ]; then read -rp "Enter your Docker Hub Username: " DOCKERHUB_USERNAME; fi
+            if [ -z "$DOCKERHUB_TOKEN" ]; then read -rsp "Enter your Docker Hub Access Token: " DOCKERHUB_TOKEN; echo ""; fi
+
+            if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+                gh secret set DOCKERHUB_USERNAME --body "${DOCKERHUB_USERNAME}" --repo "${GITHUB_REPOSITORY}"
+                gh secret set DOCKERHUB_TOKEN --body "${DOCKERHUB_TOKEN}" --repo "${GITHUB_REPOSITORY}"
+                success "Secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN have been set."
+            else
+                warn "Docker Hub credentials were not provided. Skipping Docker Hub secret creation."
+            fi
+        else
+            info "Skipping Docker Hub secret creation because CFG_CONFIGURE_DOCKERHUB_SECRET is not set to 'true' in arc_env.sh."
+        fi
+
 
         info "Generating Kubeconfig for GitHub Actions..."
         # WARNING: The following method of generating a kubeconfig is simple and works for many
