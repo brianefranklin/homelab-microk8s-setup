@@ -221,11 +221,6 @@ delete_other_projects_if_requested() {
         local project_id_to_delete=$(echo "$project_json" | jq -r '.project_id')
         local project_name_to_delete=$(echo "$project_json" | jq -r '.name')
 
-        if [[ "$project_name_to_delete" == "library" ]]; then
-            info "Skipping deletion of the default 'library' project."
-            continue
-        fi
-
         if [[ "$project_name_to_delete" == "$PROJECT_NAME" ]]; then
             info "Skipping deletion of the target project '$PROJECT_NAME' in this phase."
             continue

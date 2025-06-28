@@ -91,7 +91,7 @@ If any of the required environment variables (`HARBOR_URL`, `HARBOR_ADMIN_PASS`,
 
 *   **Admin Privileges**: The script requires Harbor administrator credentials to perform its operations.
 *   **Robot Token Security**: The robot account token displayed by the script is sensitive. Store it securely (e.g., in a password manager or as a CI/CD secret).
-*   **`DELETE_OTHER_PROJECTS`**: This option is highly destructive. It will delete **ALL** projects in your Harbor instance except for the `PROJECT_NAME` you are configuring. Double-check your intentions before enabling this. The script will *not* delete the "library" project by default if it's not the target project, but all other non-target projects are candidates for deletion if this option is enabled.
+*   **`DELETE_OTHER_PROJECTS`**: This option is highly destructive. It will delete **ALL** projects in your Harbor instance except for the `PROJECT_NAME` you are configuring, including the default `library` project.
 *   **API Version**: The script uses Harbor API v2.0. Ensure your Harbor instance supports this version.
 *   **Error Handling**: The script includes error handling for API calls and will exit if critical operations fail.
 
