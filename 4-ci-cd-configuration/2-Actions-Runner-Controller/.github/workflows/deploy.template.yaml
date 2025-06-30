@@ -32,12 +32,16 @@ jobs:
           file: ./Dockerfile # Assumes Dockerfile is at the root
           push: true
           tags: \${{ secrets.HARBOR_URL }}/${HARBOR_PROJECT_NAME}/${HARBOR_IMAGE_NAME}:\${{ github.sha }}
+      
+          # --- STEP 3: Substitute image tag in manifests ---
+      - name: Substitute image tag
+        run: |
+          find k8s/ -type f -name "*.yaml" -exec sed -i 's|__IMAGE_TAG__|${{ github.sha }}|g' {} +
 
+      # --- STEP 4: Deploy BOTH applications ---
       - name: Deploy to MicroK8s
         uses: azure/k8s-deploy@v4
         with:
-          kubeconfig: \${{ secrets.KUBE_CONFIG }}
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
           action: 'deploy'
           manifests: k8s/
-          images: |
-            \${{ secrets.HARBOR_URL }}/${HARBOR_PROJECT_NAME}/${HARBOR_IMAGE_NAME}:\${{ github.sha }}
