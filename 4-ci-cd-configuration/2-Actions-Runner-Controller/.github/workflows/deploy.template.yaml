@@ -38,7 +38,6 @@ jobs:
         with:
           kubeconfig: \${{ secrets.KUBE_CONFIG }}
           action: 'deploy'
-          manifests: |
-            ${K8S_DEPLOYMENT_MANIFEST_PATH} # e.g., k8s/deployment.yaml
+          manifests: k8s/
           images: |
             \${{ secrets.HARBOR_URL }}/${HARBOR_PROJECT_NAME}/${HARBOR_IMAGE_NAME}:\${{ github.sha }}
