@@ -702,20 +702,21 @@ configure_github_extras() {
         warn "Skipping automatic secret configuration."
     fi
 
-    info "Generating sample GitHub Actions workflow file from '${WORKFLOW_TEMPLATE_FILE}'..."
-    if [ ! -f "${WORKFLOW_TEMPLATE_FILE}" ]; then
-        error "Workflow template file not found at '${WORKFLOW_TEMPLATE_FILE}'"
-    fi
+    # Generating from template is now obsolete. This section will be removed in future versions.
+    # info "Generating sample GitHub Actions workflow file from '${WORKFLOW_TEMPLATE_FILE}'..."
+    # if [ ! -f "${WORKFLOW_TEMPLATE_FILE}" ]; then
+    #     error "Workflow template file not found at '${WORKFLOW_TEMPLATE_FILE}'"
+    # fi
 
-    mkdir -p "${GENERATED_WORKFLOW_BASE_DIR}"
+    # mkdir -p "${GENERATED_WORKFLOW_BASE_DIR}"
 
-    local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME:-deploy.yaml}"
-    info "Substituting variables and saving to '${GENERATED_WORKFLOW_FULL_PATH}'..."
-    export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE RUNNER_DEPLOYMENT_NAME
+    # local GENERATED_WORKFLOW_FULL_PATH="${GENERATED_WORKFLOW_BASE_DIR}/${GENERATED_WORKFLOW_FILENAME:-deploy.yaml}"
+    # info "Substituting variables and saving to '${GENERATED_WORKFLOW_FULL_PATH}'..."
+    # export HARBOR_PROJECT_NAME HARBOR_IMAGE_NAME K8S_DEPLOYMENT_MANIFEST_PATH RUNNER_NAMESPACE RUNNER_DEPLOYMENT_NAME
 
-    envsubst < "${WORKFLOW_TEMPLATE_FILE}" > "${GENERATED_WORKFLOW_FULL_PATH}"
-    info "Generated workflow file at '${GENERATED_WORKFLOW_FULL_PATH}'"
-    info "Please review this file and commit it to your repository's .github/workflows/ directory."
+    # envsubst < "${WORKFLOW_TEMPLATE_FILE}" > "${GENERATED_WORKFLOW_FULL_PATH}"
+    # info "Generated workflow file at '${GENERATED_WORKFLOW_FULL_PATH}'"
+    # info "Please review this file and commit it to your repository's .github/workflows/ directory."
 
 }
 
