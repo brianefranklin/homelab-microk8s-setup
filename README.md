@@ -9,3 +9,5 @@ This repository contains the infrastructure-as-code and configuration scripts fo
 *   **GitHub Actions Runner Controller (ARC)**: For managing self-hosted GitHub Actions runners within the Kubernetes cluster.
 
 The repository is structured with numbered directories that represent the sequential steps for setting up the environment, from initial Kubernetes setup to deploying applications via CI/CD.
+
+The user applications directory is optional and contains examples of using this setup. 
