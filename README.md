@@ -1,6 +1,6 @@
 # probablyfine-servers
 
-This repository contains the infrastructure-as-code and configuration scripts for managing a home lab environment. The primary goal is to establish a robust CI/CD pipeline using self-hosted services.
+This repository contains the setup scripts and configuration directions for standing up a home lab environment. The primary goal is to establish the foundation for a robust CI/CD pipeline using self-hosted services.
 
 ## Key Components
 
@@ -10,4 +10,4 @@ This repository contains the infrastructure-as-code and configuration scripts fo
 
 The repository is structured with numbered directories that represent the sequential steps for setting up the environment, from initial Kubernetes setup to deploying applications via CI/CD.
 
-The user applications directory is optional and contains examples of using this setup. 
+The user applications directory is optional and contains an example of using this setup. 

@@ -61,5 +61,6 @@
 *.exe binary
 *.dll binary
 *.bin binary
-*.app binary # macOS applications
+# macOS applications
+*.app binary 
 
