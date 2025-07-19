@@ -1,0 +1,100 @@
+name: Deploy to MicroK8s
+
+on:
+  push:
+    branches:
+      - main
+  # Trigger on a schedule using cron syntax
+  schedule:
+    # Runs at 1000 (AM) UTC every day
+    - cron: '0 10 * * *'
+
+jobs:
+  # --- JOB 1: Build all application images in parallel ---
+  build:
+    runs-on: probablyfine-servers-runner-deployment
+    strategy:
+      matrix:
+        app:
+          - { name: 'nginx', image_name: 'web-server-image' }
+          - { name: 'aws-ddns', image_name: 'aws-ddns-image' }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Harbor
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.HARBOR_URL }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Build and push ${{ matrix.app.name }} image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./9-user-apps/${{ matrix.app.name }}
+          file: ./9-user-apps/${{ matrix.app.name }}/Dockerfile
+          push: true
+          tags: ${{ secrets.HARBOR_URL }}/${{ vars.HARBOR_PROJECT_NAME }}/${{ matrix.app.image_name }}:${{ github.sha }}
+
+  # --- JOB 2: Deploy manifests after all builds succeed ---
+  deploy:
+    runs-on: probablyfine-servers-runner-deployment
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+      
+      - name: Substitute image tag
+        run: |
+          find k8s/ -type f -name "*.yaml" -exec sed -i 's|__IMAGE_TAG__|${{ github.sha }}|g' {} +
+
+      - name: Create/Update AWS DDNS Credentials Secret
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          # Write the Kubeconfig from the secret
+          echo "$KUBECONFIG_DATA" > kubeconfig.yaml
+          
+          # **FIX:** Replace the external localhost address with the internal cluster service address
+          sed -i 's|server: https://127.0.0.1:16443|server: https://kubernetes.default.svc.cluster.local:443|g' kubeconfig.yaml
+          
+          export KUBECONFIG=kubeconfig.yaml
+
+          kubectl create secret generic basic-web-server-ddns-aws-credentials \
+            --namespace=web-apps \
+            --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.BASIC_WEB_SERVER_DDNS_AWS_ACCESS_KEY_ID }} \
+            --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.BASIC_WEB_SERVER_DDNS_AWS_SECRET_ACCESS_KEY }} \
+            --from-literal=AWS_REGION=${{ secrets.BASIC_WEB_SERVER_DDNS_AWS_REGION }} \
+            --from-literal=AWS_HOSTED_ZONE_ID=${{ secrets.BASIC_WEB_SERVER_DDNS_AWS_HOSTED_ZONE_ID }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to MicroK8s
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          # Write the Kubeconfig from the secret
+          echo "$KUBECONFIG_DATA" > kubeconfig.yaml
+          
+          # **FIX:** Replace the external localhost address with the internal cluster service address
+          sed -i 's|server: https://127.0.0.1:16443|server: https://kubernetes.default.svc.cluster.local:443|g' kubeconfig.yaml
+          
+          export KUBECONFIG=kubeconfig.yaml
+          
+          # This command will now connect to the correct in-cluster API server address
+          kubectl apply -f k8s/ --recursive

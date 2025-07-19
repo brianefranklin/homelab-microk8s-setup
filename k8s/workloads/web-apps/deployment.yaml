@@ -1,0 +1,45 @@
+# k8s/workloads/web-apps/deployment.yaml
+# This file defines a Kubernetes Deployment and Service for a basic web server application.
+
+# --- NGINX TEST WEBSERVER ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: basic-webserver-app
+  namespace: web-apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: basic-webserver
+  template:
+    metadata:
+      labels:
+        app: basic-webserver
+    spec:
+      imagePullSecrets:
+      - name: harbor-credentials
+      containers:
+      - name: webserver-container
+        # This deployment will use the 'probablyfine-image'
+        image: harbor.probablyfine.click/probablyfine-prod-app/web-server-image:__IMAGE_TAG__
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: basic-webserver-service
+  namespace: web-apps
+spec:
+  selector:
+    app: basic-webserver
+  ports:
+    - protocol: TCP
+      name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+  type: NodePort

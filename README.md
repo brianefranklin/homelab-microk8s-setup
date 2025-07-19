@@ -11,3 +11,4 @@ This repository contains the setup scripts and configuration directions for stan
 The repository is structured with numbered directories that represent the sequential steps for setting up the environment, from initial Kubernetes setup to deploying applications via CI/CD.
 
 The user applications directory is optional and contains an example of using this setup. 
+

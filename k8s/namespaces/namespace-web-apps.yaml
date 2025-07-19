@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web-apps
+  labels:
+    #- You can add any labels that help you organize your cluster
+    environment: production
+    app.kubernetes.io/managed-by: gitops
