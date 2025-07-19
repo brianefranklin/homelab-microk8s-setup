@@ -1,13 +1,14 @@
 name: Deploy to MicroK8s
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  #push:
+    #branches:
+      #- main
   # Trigger on a schedule using cron syntax
-  schedule:
+  #schedule:
     # Runs at 1000 (AM) UTC every day
-    - cron: '0 10 * * *'
+    #- cron: '0 10 * * *'
 
 jobs:
   # --- JOB 1: Build all application images in parallel ---
