@@ -21,14 +21,15 @@ Before you begin, ensure you have the following:
 
 ## Repository Structure
 
-The repository is organized into numbered directories, designed to be followed sequentially. Each directory represents a logical step in the setup process and contains its own set of instructions.
+The repository is organized into numbered directories, designed to be followed sequentially. Each directory represents a logical step in the setup process and contains its own set of instructions. 
 
 ```
 probablyfine-servers/
-├── 01-setup-kubernetes/  # Initial setup of the MicroK8s cluster
-├── 02-setup-harbor/      # Deployment of the Harbor container registry
-├── 03-setup-arc/         # Installation of the GitHub Actions Runner Controller
-└── apps/                 # (Optional) Example applications using the CI/CD pipeline
+├── 1-server-config
+├── 2-container-orchestration
+├── 3-registry-install
+├── 4-ci-cd-configuration
+└── 5-metallb-install
 ```
 
 ## Setup Guide
