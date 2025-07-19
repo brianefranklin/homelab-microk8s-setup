@@ -1,14 +1,46 @@
-# probablyfine-servers
+# homelab-microk8s-setup
 
-This repository contains the setup scripts and configuration directions for standing up a home lab environment. The primary goal is to establish the foundation for a robust CI/CD pipeline using self-hosted services.
+This repository provides the Infrastructure as Code (IaC) and configuration scripts to bootstrap a complete home lab environment from scratch. The primary goal is to create a robust, self-hosted CI/CD platform, enabling you to build, test, and deploy your applications using your own infrastructure.
 
-## Key Components
+## Core Technologies
 
-*   **Kubernetes (MicroK8s)**: The container orchestration platform.
-*   **Harbor**: A self-hosted container registry for storing Docker images.
-*   **GitHub Actions Runner Controller (ARC)**: For managing self-hosted GitHub Actions runners within the Kubernetes cluster.
+This setup is built upon a foundation of powerful, open-source tools:
 
-The repository is structured with numbered directories that represent the sequential steps for setting up the environment, from initial Kubernetes setup to deploying applications via CI/CD.
+*   **Kubernetes (MicroK8s)**: Serves as the backbone for container orchestration, managing application lifecycles and resources.
+*   **Harbor**: A private, self-hosted container registry to securely store and manage your Docker images.
+*   **GitHub Actions Runner Controller (ARC)**: Integrates with your Kubernetes cluster to dynamically scale self-hosted runners for your GitHub Actions workflows.
 
-The user applications directory is optional and contains an example of using this setup. 
+## Prerequisites
 
+Before you begin, ensure you have the following:
+
+*   A server or virtual machine to act as your Kubernetes node.
+*   A fresh installation of a supported Linux distribution (e.g., Ubuntu 22.04 LTS).
+*   Basic familiarity with the command line, Kubernetes concepts, and YAML.
+*   A GitHub account and a Personal Access Token (PAT) with appropriate permissions for using the GitHub Actions Runner Controller.
+
+## Repository Structure
+
+The repository is organized into numbered directories, designed to be followed sequentially. Each directory represents a logical step in the setup process and contains its own set of instructions.
+
+```
+probablyfine-servers/
+├── 01-setup-kubernetes/  # Initial setup of the MicroK8s cluster
+├── 02-setup-harbor/      # Deployment of the Harbor container registry
+├── 03-setup-arc/         # Installation of the GitHub Actions Runner Controller
+└── apps/                 # (Optional) Example applications using the CI/CD pipeline
+```
+
+## Setup Guide
+
+To build your home lab, navigate through the numbered directories in ascending order. Each directory contains its own `README.md` with detailed instructions for that specific step.
+
+Start with the first step:
+
+```bash
+# 1. Begin with the Kubernetes setup
+cd 01-setup-kubernetes/
+
+# 2. Follow the instructions in its README.md
+# 3. Once complete, proceed to the next directory (e.g., 02-setup-harbor/)
+```
