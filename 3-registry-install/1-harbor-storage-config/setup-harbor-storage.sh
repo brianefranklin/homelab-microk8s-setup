@@ -4,14 +4,19 @@
 # This script is not idempotent and should be run only once to set up the storage.
 
 # --- Source Shared Environment Variables ---
-HARBOR_ENV_PATH="../harbor_env.sh" # Path relative to this script
+if [ -n "$1" ]; then
+    HARBOR_ENV_PATH="$1"
+    echo "--- Using configuration file from command line argument: $HARBOR_ENV_PATH ---"
+else
+    HARBOR_ENV_PATH="../harbor_env.sh" # Default path relative to this script
+    echo "--- Using default configuration file: $HARBOR_ENV_PATH ---"
+fi
 
 if [ -f "$HARBOR_ENV_PATH" ]; then
     # shellcheck source=../harbor_env.sh
     source "$HARBOR_ENV_PATH"
 else
     echo "❌ ERROR: Shared environment file '$HARBOR_ENV_PATH' not found." >&2
-    echo "Please ensure it exists and is configured." >&2
     exit 1
 fi
 

@@ -11,6 +11,27 @@ The installation process is divided into several sequential stages, each handled
 *   You will need an AWS account with a Route53 Hosted Zone for your domain.
 *   Prepare AWS IAM credentials with permissions to modify Route53 records for DNS-01 challenges. Details for a restrictive IAM policy can be found in the `install_notes.txt` and are implemented by the script in `2-clusterissuer-install`.
 
+## Central Configuration
+
+This project uses a central configuration file to manage all user-specific variables (like domain names, AWS credentials, etc.) across the different installation scripts. This approach avoids the need to edit each script individually.
+
+*   **Configuration File**: The main configuration file is `config/cluster-env.conf`. Before running any scripts, you must populate this file with your specific values.
+    ```bash
+    # Edit the configuration file with your values
+    nano config/cluster-env.conf
+    ```
+
+*   **Default Usage**: All scripts in the installation stages are designed to automatically source this configuration file from its default location.
+
+*   **Overriding the Configuration File**: You can specify a different configuration file path by passing it as the first command-line argument to any of the scripts. This is useful for managing multiple environments (e.g., staging vs. production).
+    ```bash
+    # Example for stage 1 (run from the 2-container-orchestration/ directory)
+    ./1-microk8s-install/initialize-microk8s-cluster.sh /path/to/your/custom-env.conf
+
+    # Example for stage 2
+    ./2-clusterissuer-install/apply-clusterissuer.sh /path/to/your/custom-env.conf
+    ```
+
 ## Installation Stages
 
 Each directory contains its own `README.md` with detailed instructions for that specific stage.

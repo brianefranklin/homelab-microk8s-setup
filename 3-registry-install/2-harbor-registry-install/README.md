@@ -14,14 +14,15 @@ This script automates the deployment or upgrade of Harbor, an open-source contai
 The `deploy-harbor.sh` script performs the following key actions:
 
 1.  **Configuration**: Sets core variables (`APP_NAME`, `DOMAIN`, `CHART_REPO_NAME`) and derives others like hostname and namespace.
-2.  **Admin Password Management**:
+2.  **Configuration Loading**: Sources an environment file (`../harbor_env.sh` by default) to load required variables. The path to this file can be overridden via a command-line argument.
+3.  **Admin Password Management**:
     *   Checks for an existing Kubernetes secret (`<APP_NAME>-admin-password`) in the Harbor namespace.
     *   If the secret exists, it reads the password for use in an upgrade.
     *   If the secret does not exist, it generates a new random password, displays it once to the user, and stores it in a new Kubernetes secret.
-3.  **Helm Repository Management**:
+4.  **Helm Repository Management**:
     *   Adds the specified Harbor Helm chart repository (`goharbor`) if it's not already configured.
     *   Updates Helm repositories to ensure the latest chart versions are available.
-4.  **Harbor Deployment/Upgrade**:
+5.  **Harbor Deployment/Upgrade**:
     *   Uses `envsubst` to substitute configured environment variables (like hostname and password) into a `harbor-values.template.yaml` file.
     *   Deploys or upgrades Harbor using `microk8s.helm3 upgrade --install`. This command is idempotent, meaning it will install Harbor if it's not present or upgrade an existing installation.
     *   Ensures the target namespace is created if it doesn't exist.
@@ -47,22 +48,32 @@ Before running this script, ensure the following setup is complete, typically by
 
 ## Configuration
 
-You need to configure core values directly within the `deploy-harbor.sh` script before execution:
+This script is configured via a central environment file, typically located at `../harbor_env.sh`. Before running the script, you must ensure this file exists and contains the necessary variables.
 
-1.  Open `deploy-harbor.sh` in a text editor.
-2.  Locate the section `--- CONFIGURE YOUR CORE VALUES HERE ---`.
-3.  Update the following environment variables:
-    *   `APP_NAME`: The base name for Harbor resources (e.g., "harbor"). This will also be used as the namespace and Helm release name.
-    *   `DOMAIN`: Your domain name where Harbor will be accessible (e.g., "yourdomain.com"). The script will construct the Harbor hostname as `${APP_NAME}.${DOMAIN}`.
-    *   `CHART_REPO_NAME`: The name of the Helm chart repository (default: "goharbor").
+The following variables from `harbor_env.sh` are used by this script:
+*   `HARBOR_INSTANCE_NAME`: The base name for the Helm release and namespace.
+*   `HARBOR_DOMAIN`: Your domain name where Harbor will be accessible.
+*   `HARBOR_PROTOCOL`: The protocol to use (e.g., "https").
+*   `HARBOR_CHART_REPO_ALIAS`: The local alias for the Helm chart repository.
+*   `HARBOR_CHART_REPO_URL`: The URL of the Helm chart repository.
+*   `KUBECTL_CMD`: The command to use for `kubectl`.
+*   `HELM_CMD`: The command to use for `helm`.
+
+### Overriding the Configuration File Path
+
+You can specify a different configuration file by passing its path as the first argument to the script.
+
+```bash
+./deploy-harbor.sh /path/to/your/custom_harbor_env.sh
+```
 
 ## Usage
 
 1.  **Ensure Prerequisites**: Verify all prerequisites listed above are met.
-2.  **Configure the Script**: Edit `deploy-harbor.sh` with your specific values as described in the "Configuration" section.
-3.  **Navigate to Script Directory**: Open your terminal and change to the directory containing `deploy-harbor.sh` and `harbor-values.template.yaml`.
+2.  **Configure Environment**: Ensure `../harbor_env.sh` (or a custom file) is correctly populated.
+3.  **Navigate to Script Directory**: Open your terminal and change to the directory containing `deploy-harbor.sh`.
     ```bash
-    cd /path/to/harbor-install/4-core-services-install
+    cd /path/to/2-harbor-registry-install
     ```
 4.  **Make Executable**: If necessary, make the script executable:
     ```bash
@@ -84,23 +95,23 @@ After the script completes, you can verify the Harbor deployment:
 
 1.  **Check Pods**:
     ```bash
-    microk8s.kubectl get pods -n <YOUR_APP_NAME> # e.g., microk8s.kubectl get pods -n harbor
+    microk8s.kubectl get pods -n ${HARBOR_INSTANCE_NAME}
     ```
     Wait for all Harbor pods to be in the `Running` state and have their containers ready.
 
 2.  **Check Ingress**:
     ```bash
-    microk8s.kubectl get ingress -n <YOUR_APP_NAME>
+    microk8s.kubectl get ingress -n ${HARBOR_INSTANCE_NAME}
     ```
     Ensure an Ingress resource is created and has an address.
 
 3.  **Access Harbor UI**:
-    Open a web browser and navigate to `https://<YOUR_APP_NAME>.<YOUR_DOMAIN>` (e.g., `https://harbor.yourdomain.com`). You should see the Harbor login page. Log in with username `admin` and the password that was generated or previously set.
+    Open a web browser and navigate to `https://<HARBOR_INSTANCE_NAME>.<HARBOR_DOMAIN>`. You should see the Harbor login page. Log in with username `admin` and the password that was generated or previously set.
 
 4.  **Check Certificates**:
     Verify that SSL certificates are correctly issued for your Harbor instance.
     ```bash
-    microk8s.kubectl describe certificate -n <YOUR_APP_NAME>
+    microk8s.kubectl describe certificate -n ${HARBOR_INSTANCE_NAME}
     ```
 
 ## Un-deployment or Reconfiguration

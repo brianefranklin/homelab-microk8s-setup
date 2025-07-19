@@ -1,14 +1,21 @@
 #!/bin/bash
 
 # --- Source Environment Configuration ---
-CONFIG_FILE="../config/env.sh"
+if [ -n "$1" ]; then
+    CONFIG_FILE="$1"
+    echo "ℹ️  Using configuration file from command line argument: $CONFIG_FILE"
+else
+    CONFIG_FILE="../config/cluster-env.conf"
+    echo "ℹ️  Using default configuration file: $CONFIG_FILE"
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck source=../config/env.sh
+    # shellcheck source=../config/cluster-env.conf
     source "$CONFIG_FILE"
     echo "✅ Loaded configuration from $CONFIG_FILE"
 else
     echo "❌ ERROR: Configuration file '$CONFIG_FILE' not found." >&2
-    echo "Please create it in the same directory as this script." >&2
+    echo "Please create it at the default location or provide a path as an argument." >&2
     exit 1
 fi
 

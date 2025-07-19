@@ -93,11 +93,18 @@ create_aws_secret() {
     print_header "Creating AWS Secret for Cert-Manager DNS-01 Challenge"
 
     # Source config file to get variable names
-    local config_file="../config/env.sh"
+    # Use command-line argument for config file if provided, otherwise use default
+    if [ -n "$1" ]; then
+        local config_file="$1"
+        info "Using configuration file from command line argument: $config_file"
+    else
+        local config_file="../config/cluster-env.conf"
+        info "Using default configuration file: $config_file"
+    fi
     if [ ! -f "$config_file" ]; then
         error "Configuration file '$config_file' not found. Cannot create AWS secret."
     fi
-    # shellcheck source=../config/env.sh
+    # shellcheck source=../config/cluster-env.conf
     source "$config_file"
 
     # Check if the secret already exists
