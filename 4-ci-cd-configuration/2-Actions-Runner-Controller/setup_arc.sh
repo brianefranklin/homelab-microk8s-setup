@@ -17,7 +17,7 @@
 #   - To clean up a previous setup: ./setup_arc.sh --cleanup
 #
 # PREREQUISITES:
-#   - A configured `arc_env.sh` file in the same directory.
+#   - A configured `arc_env.conf` file in the parent directory.
 #   - Your GitHub App ID, Installation ID, and the path to your App's private key file.
 #   - `curl` for API calls.
 #   - `kubectl` and `helm` installed and configured to point to your cluster.
@@ -26,22 +26,9 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# --- DEBUG MODE ---
-DEBUG_MODE=false
-if [[ "$1" == "--debug" ]]; then
-    DEBUG_MODE=true
-    shift # Remove --debug from arguments, so the rest of the script processes them normally
-fi
-
-if $DEBUG_MODE; then
-    set -x # Echo commands before execution
-fi
-
 # --- CONFIGURATION (for non-interactive use) ---
 # Set these variables to run the script without prompts.
 # If a variable is empty, the script will prompt for the value.
-
-
 
 # --- Helper Functions for Logging ---
 info() {
@@ -93,14 +80,6 @@ verify_github_pat_scopes() {
         return 1
     fi
 }
-
-# --- Source Environment Variables ---
-if [ ! -f "../arc_env.sh" ]; then
-    error "Configuration file 'arc_env.sh' not found. Please create it before running this script."
-fi
-# shellcheck source=arc_env.sh
-source ../arc_env.sh
-info "Loaded configuration from arc_env.sh"
 
 # --- Function Definitions ---
 
@@ -208,7 +187,7 @@ setup_prerequisites() {
             else
                 # If non-interactive and failed, exit.
                 if [ -n "$CFG_GITHUB_TOKEN" ]; then
-                    error "The pre-configured GITHUB_TOKEN in arc_env.sh is invalid or missing the 'read:packages' scope."
+                    error "The pre-configured GITHUB_TOKEN in arc_env.conf is invalid or missing the 'read:packages' scope."
                 fi
                 # Reset token to re-prompt the user
                 GITHUB_TOKEN=""
@@ -685,7 +664,7 @@ configure_github_extras() {
                 warn "Docker Hub credentials were not provided. Skipping Docker Hub secret creation."
             fi
         else
-            info "Skipping Docker Hub secret creation because CFG_CONFIGURE_DOCKERHUB_SECRET is not set to 'true' in arc_env.sh."
+            info "Skipping Docker Hub secret creation because CFG_CONFIGURE_DOCKERHUB_SECRET is not set to 'true' in arc_env.conf."
         fi
 
 
@@ -768,8 +747,54 @@ cleanup() {
 
 # --- Main Execution Logic ---
 main() {
-    # Check for --cleanup flag
-    if [[ "$1" == "--cleanup" ]]; then
+    # --- Argument Parsing ---
+    local config_path=""
+    local action="setup"
+    DEBUG_MODE=false
+
+    # Process arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --cleanup)
+                action="cleanup"
+                shift # past argument
+                ;;
+            --debug)
+                DEBUG_MODE=true
+                shift # past argument
+                ;;
+            *)
+                # If an argument is not a recognized flag, and we haven't set a config path yet,
+                # assume it's the config path. This allows the path to be anywhere in the command.
+                if [[ -z "$config_path" ]]; then
+                    config_path="$1"
+                else
+                    warn "Ignoring unexpected argument: $1"
+                fi
+                shift # past argument or value
+                ;;
+        esac
+    done
+
+    if $DEBUG_MODE; then
+        set -x # Echo commands before execution
+    fi
+
+    # --- Source Environment Variables ---
+    local final_config_path="${config_path:-../arc_env.conf}"
+    
+    if [[ -n "$config_path" ]]; then
+        info "Using configuration file from command line: ${final_config_path}"
+    else
+        info "Using default configuration file: ${final_config_path}"
+    fi
+
+    if [ ! -f "${final_config_path}" ]; then
+        error "Configuration file '${final_config_path}' not found. Please create it or specify a valid path."
+    fi
+    # The shellcheck directive below is for static analysis of the default file.
+    # shellcheck source=../arc_env.conf
+
         cleanup
         exit 0
     fi

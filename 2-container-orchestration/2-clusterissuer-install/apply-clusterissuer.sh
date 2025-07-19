@@ -5,12 +5,12 @@ if [ -n "$1" ]; then
     CONFIG_FILE="$1"
     echo "ℹ️  Using configuration file from command line argument: $CONFIG_FILE"
 else
-    CONFIG_FILE="../config/cluster-env.conf"
+    CONFIG_FILE="../cluster-env.conf"
     echo "ℹ️  Using default configuration file: $CONFIG_FILE"
 fi
 
 if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck source=../config/cluster-env.conf
+    # shellcheck source=../cluster-env.conf
     source "$CONFIG_FILE"
     echo "✅ Loaded configuration from $CONFIG_FILE"
 else

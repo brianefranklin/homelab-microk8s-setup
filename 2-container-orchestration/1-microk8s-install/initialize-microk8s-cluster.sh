@@ -98,13 +98,13 @@ create_aws_secret() {
         local config_file="$1"
         info "Using configuration file from command line argument: $config_file"
     else
-        local config_file="../config/cluster-env.conf"
+        local config_file="../cluster-env.conf"
         info "Using default configuration file: $config_file"
     fi
     if [ ! -f "$config_file" ]; then
         error "Configuration file '$config_file' not found. Cannot create AWS secret."
     fi
-    # shellcheck source=../config/cluster-env.conf
+    # shellcheck source=../cluster-env.conf
     source "$config_file"
 
     # Check if the secret already exists
