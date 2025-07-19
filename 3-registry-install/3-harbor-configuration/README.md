@@ -1,10 +1,14 @@
 # Harbor Configuration Script (`configure_harbor_project.sh`)
 
-This script automates the configuration of a Harbor instance with best practices tailored for a CI/CD workflow. It sets up a new project, configures security features, creates a robot account for automation, and establishes retention and immutability policies.
+This script automates the post-deployment configuration of a Harbor instance with best practices tailored for a CI/CD workflow. It sets up a new project, configures security features, creates a robot account for automation, and establishes retention and immutability policies.
 
 ## Features
 
 *   **Project Creation**: Creates a new private project in Harbor.
+*   **Automated Credential Handling**:
+    *   Sources configuration from a central `harbor_env.sh` file.
+    *   If the admin password (`HARBOR_ADMIN_PASS`) is not set in the environment file, the script will automatically attempt to retrieve it from the Kubernetes secret created by the `deploy-harbor.sh` script.
+    *   Falls back to interactive prompts if credentials cannot be found automatically.
 *   **Vulnerability Scanning**:
     *   Enables automatic vulnerability scanning on push.
     *   Prevents pulling of images with vulnerabilities of 'high' severity or worse.
@@ -19,10 +23,7 @@ This script automates the configuration of a Harbor instance with best practices
 *   **System-wide Garbage Collection**:
     *   Schedules system-wide garbage collection to run every Tuesday at 4:00 AM.
 *   **Idempotency**: The script attempts to be idempotent. If a resource (project, robot account, policy) already exists with the target configuration, it will skip creation and issue a warning.
-*   **Interactive & Environment Variable Driven**:
-    *   Can be run interactively, prompting for necessary configuration values.
-    *   Alternatively, configuration can be pre-set via environment variables for non-interactive execution.
-*   **Optional Project Cleanup**: Provides an option to delete all other existing projects (except the one being configured). This is a destructive operation and requires explicit confirmation.
+*   **Optional Project Cleanup**: Provides a configurable option (`DELETE_OTHER_PROJECTS`) to delete all other existing projects. This is a destructive operation and is disabled by default.
 
 ## Prerequisites
 
@@ -31,47 +32,42 @@ This script automates the configuration of a Harbor instance with best practices
 
 The script will check for these dependencies and exit if they are not found.
 
+## Configuration
+
+The script is configured primarily through the central `../harbor_env.sh` file. It will use the values from this file first. If a required variable is empty, the script will fall back to prompting you for the information.
+
+The following variables from `harbor_env.sh` are used:
+*   `HARBOR_URL`: The full URL of your Harbor instance (e.g., `https://harbor.yourdomain.com`).
+*   `HARBOR_ADMIN_USER`: The username for a Harbor admin account (default: `admin`).
+*   `HARBOR_ADMIN_PASS`: The password for the Harbor admin account. **If left empty, the script will try to fetch it from the Kubernetes secret.**
+*   `PROJECT_NAME`: The name for the new project to be created.
+*   `ROBOT_NAME`: The name for the robot account. If left empty, a default name is generated based on the project name.
+*   `DELETE_OTHER_PROJECTS`: Set to `yes` or `y` to enable deletion of all other projects. **Use with extreme caution.**
+*   `HARBOR_INSTANCE_NAME`: Used to find the Kubernetes secret for the admin password.
+*   `KUBECTL_CMD`: The command to use for `kubectl` (e.g., `microk8s.kubectl`).
+
+### Overriding the Configuration File Path
+
+You can specify a different environment file by passing its path as the first argument to the script.
+
+```bash
+./configure_harbor_project.sh /path/to/your/custom_env.sh
+```
+
 ## Usage
 
-1.  **Make the script executable**:
+1.  **Configure Environment**: Ensure `../harbor_env.sh` (or a custom file) is correctly populated. For a first run, you can leave `HARBOR_ADMIN_PASS` empty.
+2.  **Make Executable**:
     ```bash
     chmod +x configure_harbor_project.sh
     ```
-
-2.  **Run the script**:
+3.  **Run the Script**:
     ```bash
     ./configure_harbor_project.sh
     ```
+    The script will wait for Harbor to be ready before proceeding.
 
-### Configuration
-
-The script can be configured in two ways:
-
-#### 1. Environment Variables (Recommended for CI/CD)
-
-You can set the following environment variables before running the script:
-
-*   `HARBOR_URL`: The full URL of your Harbor instance (e.g., `https://myharbor.example.com`).
-*   `HARBOR_ADMIN_USER`: The username for a Harbor admin account (default: `admin`).
-*   `HARBOR_ADMIN_PASS`: The password for the Harbor admin account.
-*   `PROJECT_NAME`: The name for the new project to be created (default: `my-app`).
-*   `ROBOT_NAME`: The name for the robot account (default: `${PROJECT_NAME}-github-actions-builder`).
-*   `DELETE_OTHER_PROJECTS`: Set to `yes` or `y` to enable non-interactive deletion of all other projects. **Use with extreme caution.** (default: `no`).
-
-**Example:**
-```bash
-export HARBOR_URL="https://harbor.example.com"
-export HARBOR_ADMIN_USER="admin"
-export HARBOR_ADMIN_PASS="yourSuperSecretPassword"
-export PROJECT_NAME="production-app"
-export ROBOT_NAME="prod-builder-robot"
-export DELETE_OTHER_PROJECTS="no" # Be very careful with "yes"
-./configure_harbor_project.sh
-```
-
-#### 2. Interactive Prompts
-
-If any of the required environment variables (`HARBOR_URL`, `HARBOR_ADMIN_PASS`, `PROJECT_NAME`) are not set or are empty, the script will prompt you to enter them interactively. Default values are provided where applicable.
+    If credentials are not fully specified, you will be prompted to enter them.
 
 ### Script Output
 
@@ -100,7 +96,7 @@ If any of the required environment variables (`HARBOR_URL`, `HARBOR_ADMIN_PASS`,
 1.  **Dependency Check**: Verifies `curl` and `jq` are installed.
 2.  **User Prompts/Environment Variable Loading**: Gathers necessary configuration.
 3.  **Optional: Delete Other Projects**: If `DELETE_OTHER_PROJECTS` is set to "yes", it attempts to delete all projects except the target `PROJECT_NAME`.
-4.  **Harbor Health Check**: Authenticates and checks connectivity to the Harbor instance.
+4.  **Harbor Health Check**: Waits for the Harbor API to become available and validates credentials before proceeding.
 5.  **Create Project**:
     *   Creates a new private project.
     *   Configures project metadata for auto-scanning, preventing pulling vulnerable images (high severity), and sets the project ID.

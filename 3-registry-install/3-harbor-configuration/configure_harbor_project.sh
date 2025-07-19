@@ -19,17 +19,22 @@
 # If any of these variables are not set (or are set to an empty string), 
 # the script will fall back to prompting the user interactively for that specific 
 # piece of information.
-HARBOR_ENV_PATH="../harbor_env.sh" # Path relative to this script
+# --- Source Shared Environment Variables ---
+if [ -n "$1" ]; then
+    HARBOR_ENV_PATH="$1"
+    echo "--- Using configuration file from command line argument: $HARBOR_ENV_PATH ---"
+else
+    HARBOR_ENV_PATH="../harbor_env.sh" # Default path relative to this script
+    echo "--- Using default configuration file: $HARBOR_ENV_PATH ---"
+fi
 
 if [ -f "$HARBOR_ENV_PATH" ]; then
     # shellcheck source=../harbor_env.sh
     source "$HARBOR_ENV_PATH"
-    echo -e "\033[0;36m[INFO] Loaded shared configuration from '$HARBOR_ENV_PATH'.\033[0m"
 else
-    # Proceeding without the env file means all values will be prompted for.
-    echo -e "\033[1;33m[WARNING] Shared environment file '$HARBOR_ENV_PATH' not found. You will be prompted for all configurations.\033[0m"
+    echo "❌ ERROR: Shared environment file '$HARBOR_ENV_PATH' not found." >&2
+    exit 1
 fi
-
 # Variables expected from harbor_env.sh (or to be prompted for):
 # HARBOR_URL
 # HARBOR_ADMIN_USER

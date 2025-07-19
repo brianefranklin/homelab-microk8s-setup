@@ -37,13 +37,24 @@ echo "================================================================="
 echo
 
 # --- Source Environment Variables ---
-if [ ! -f "../../arc_env.sh" ]; then
-    fail "Configuration file 'arc_env.sh' not found in the parent directory. Cannot proceed."
+# Determine the configuration file path. Use the first argument if provided, otherwise use the default.
+DEFAULT_CONFIG_PATH="../../arc_env.conf"
+CONFIG_PATH="${1:-$DEFAULT_CONFIG_PATH}"
+
+if [[ "$1" ]]; then
+    info "Using configuration file from command line argument: ${CONFIG_PATH}"
+else
+    info "Using default configuration file: ${CONFIG_PATH}"
+fi
+
+if [ ! -f "${CONFIG_PATH}" ]; then
+    fail "Configuration file '${CONFIG_PATH}' not found. Cannot proceed."
     exit 1
 fi
-# shellcheck source=../arc_env.sh
-source ../../arc_env.sh
-info "Loaded configuration from 'arc_env.sh'."
+# The shellcheck directive below is for static analysis of the default file.
+# shellcheck source=../../arc_env.conf
+source "${CONFIG_PATH}"
+info "Loaded configuration from '${CONFIG_PATH}'."
 info "Target GitHub Repository: ${GITHUB_REPOSITORY}"
 info "ARC Namespace: ${ARC_NAMESPACE}"
 info "Runner Namespace: ${RUNNER_NAMESPACE}"
@@ -90,17 +101,17 @@ fi
 
 check "Verifying Credentials in Live Cluster Secret"
 output_header "Decoded Secret Credentials"
-echo "Comparing live secret data against arc_env.sh..."
+echo "Comparing live secret data against arc_env.conf..."
 echo "--------------------------------------------------"
 # App ID
 SECRET_APP_ID=$(${KUBECTL_CMD} get secret ${ARC_CONTROLLER_SECRET_NAME} -n ${ARC_NAMESPACE} -o jsonpath='{.data.github_app_id}' 2>/dev/null | base64 --decode)
 echo "App ID from Secret:      ${SECRET_APP_ID}"
-echo "App ID from arc_env.sh:  ${CFG_GITHUB_APP_ID}"
+echo "App ID from arc_env.conf:  ${CFG_GITHUB_APP_ID}"
 if [[ "$SECRET_APP_ID" == "$CFG_GITHUB_APP_ID" ]]; then ok "App IDs match."; else fail "App IDs DO NOT MATCH."; fi
 # Installation ID
 SECRET_INSTALL_ID=$(${KUBECTL_CMD} get secret ${ARC_CONTROLLER_SECRET_NAME} -n ${ARC_NAMESPACE} -o jsonpath='{.data.github_app_installation_id}' 2>/dev/null | base64 --decode)
 echo "Install ID from Secret:     ${SECRET_INSTALL_ID}"
-echo "Install ID from arc_env.sh: ${CFG_GITHUB_APP_INSTALLATION_ID}"
+echo "Install ID from arc_env.conf: ${CFG_GITHUB_APP_INSTALLATION_ID}"
 if [[ "$SECRET_INSTALL_ID" == "$CFG_GITHUB_APP_INSTALLATION_ID" ]]; then ok "Installation IDs match."; else fail "Installation IDs DO NOT MATCH."; fi
 # Private Key
 echo "Verifying private key integrity..."
@@ -127,7 +138,7 @@ fi
 # === LAYER 5: LIVE GITHUB API CHECK ===
 check "Querying GitHub API for Live Runner Status"
 if [[ -z "$CFG_GITHUB_TOKEN" ]]; then
-    warn "CFG_GITHUB_TOKEN is not set in arc_env.sh. Skipping live GitHub API checks."
+    warn "CFG_GITHUB_TOKEN is not set in arc_env.conf. Skipping live GitHub API checks."
 else
     API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runners"
     info "Querying GitHub API endpoint: ${API_URL}"
@@ -159,4 +170,3 @@ echo
 echo "================================================================="
 info "Diagnostic script finished."
 echo "================================================================="
-
